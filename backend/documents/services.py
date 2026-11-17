@@ -1,5 +1,6 @@
-from .models import PermisoDocumento
+from django.db.models import Q
 from workspaces.models import MiembroEspacio
+from .models import Documento, PermisoDocumento
 
 JERARQUIA = {
     "LECTURA": 1,
@@ -28,3 +29,13 @@ def tiene_nivel(usuario, documento, nivel_minimo):
     if nivel is None:
         return False
     return JERARQUIA[nivel] >= JERARQUIA[nivel_minimo]
+
+
+
+def documentos_visibles(usuario):
+    return Documento.objects.filter(
+        eliminado_en__isnull=True
+    ).filter(
+        Q(espacio__gestor=usuario)
+        | Q(permisos__usuario=usuario, espacio__miembros__usuario=usuario)
+    ).distinct()
