@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "corsheaders",
+    "accounts",
 ]
 
 MIDDLEWARE = [
@@ -140,5 +141,7 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOWED_ORIGINS = ["http://localhost:5173"]
+
+AUTH_USER_MODEL = "accounts.Usuario"
 
     
