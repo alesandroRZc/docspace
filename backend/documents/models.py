@@ -29,13 +29,12 @@ class VersionesDocumento(models.Model):
         
     def save(self, *args, **kwargs):
         if not self._state.adding:
-            raise ValueError("Una version emitido no se puede modificar.")
+            raise ValueError("Una version registrada no se puede modificar.")
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        raise ValueError("Una version emitido no se puede eliminar.")
-
-    
+        raise ValueError("Una version registrada no se puede eliminar.")
+        
 class PermisoDocumento(models.Model):
     class Nivel(models.TextChoices):
             LECTURA = "LECTURA", "Lectura"
