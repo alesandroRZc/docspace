@@ -21,7 +21,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView , TokenRefreshVie
 from accounts.views import RegistroView
 from documents.views import DocumentoListView, DocumentoDetailView, GuardarVersionView, VersionListView, AsignarPermisoView, CompararVersionesView,  RestaurarVersionView
 from workspaces.views import EspacioListCreateView, AgregarMiembroView
-
+from audit.views import BitacoraListView
 
 
 urlpatterns = [
@@ -40,4 +40,5 @@ urlpatterns = [
     path("api/documents/<uuid:pk>/permissions/", AsignarPermisoView.as_view(), name="documento-permissions"),
     path("api/documents/<uuid:pk>/compare/", CompararVersionesView.as_view(), name="documento-compare"),
     path("api/documents/<uuid:pk>/versions/<int:numero>/restore/", RestaurarVersionView.as_view(), name="documento-restore"),
+    path("api/audit/", BitacoraListView.as_view(), name="bitacora-list"),
 ]

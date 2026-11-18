@@ -134,3 +134,18 @@ def test_eliminar_es_borrado_logico():
     doc.refresh_from_db()
     assert doc.eliminado_en is not None
     assert VersionDocumento.objects.filter(documento=doc).count() == 1
+    
+@pytest.mark.django_db
+def test_bitacora_no_muestra_eventos_de_otro_espacio():
+    gestor_a = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    gestor_b = Usuario.objects.create_user(email="b@x.com", username="b", password="Clave12345", nombre="B", tipo_cuenta="GESTOR")
+    espacio_a = EspacioTrabajo.objects.create(gestor=gestor_a, nombre="Espacio A")
+    doc_a = Documento.objects.create(espacio=espacio_a, creador=gestor_a, titulo="Secreto de A")
+    guardar_version(doc_a, gestor_a, "Contenido secreto")
+
+    cliente = APIClient()
+    cliente.force_authenticate(user=gestor_b)
+    r = cliente.get("/api/audit/")
+
+    assert r.status_code == 200
+    assert r.json() == []
