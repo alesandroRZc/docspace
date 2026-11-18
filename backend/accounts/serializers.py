@@ -11,3 +11,4 @@ class RegistroSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         return Usuario.objects.create_user(**validated_data)
+    
