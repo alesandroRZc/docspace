@@ -13,6 +13,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError
 from .models import PermisoDocumento
 from audit.services import registrar_evento
+from django.utils import timezone
 
 Usuario = get_user_model()
 
@@ -38,11 +39,20 @@ class DocumentoListView(generics.ListCreateAPIView):
             guardar_version(documento, usuario, "")
 
 
-class DocumentoDetailView(generics.RetrieveAPIView):
+class DocumentoDetailView(generics.RetrieveDestroyAPIView):
     serializer_class = DocumentoSerializer
 
     def get_queryset(self):
         return documentos_visibles(self.request.user)
+
+    def perform_destroy(self, instance):
+        if not tiene_nivel(self.request.user, instance, "ADMINISTRACION"):
+            raise PermissionDenied("Necesitas permiso de administración para eliminar el documento.")
+
+        with transaction.atomic():
+            instance.eliminado_en = timezone.now()
+            instance.save(update_fields=["eliminado_en"])
+            registrar_evento(instance.espacio, self.request.user, "ELIMINAR_DOCUMENTO", "DOCUMENTO", instance.id, {"titulo": instance.titulo})
     
 class GuardarVersionView(APIView):
     @extend_schema(request=GuardarVersionSerializer, responses=VersionSerializer)

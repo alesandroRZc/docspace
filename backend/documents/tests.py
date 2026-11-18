@@ -115,3 +115,22 @@ def test_guardar_registra_evento_en_bitacora():
     eventos = BitacoraAuditoria.objects.filter(recurso_id=doc.id, accion="EDITAR_DOCUMENTO")
     assert eventos.count() == 1
     assert eventos.first().usuario == gestor
+    
+@pytest.mark.django_db
+def test_eliminar_es_borrado_logico():
+    gestor = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    espacio = EspacioTrabajo.objects.create(gestor=gestor, nombre="Espacio A")
+    doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc 1")
+    guardar_version(doc, gestor, "Hola")
+
+    cliente = APIClient()
+    cliente.force_authenticate(user=gestor)
+    r = cliente.delete(f"/api/documents/{doc.id}/")
+    assert r.status_code == 204
+
+    r = cliente.get(f"/api/documents/{doc.id}/")
+    assert r.status_code == 404
+
+    doc.refresh_from_db()
+    assert doc.eliminado_en is not None
+    assert VersionDocumento.objects.filter(documento=doc).count() == 1
