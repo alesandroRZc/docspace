@@ -116,3 +116,14 @@ class CompararVersionesView(APIView):
             "diferencias": comparar_versiones(version_a, version_b),
         })
     
+class RestaurarVersionView(APIView):
+    @extend_schema(request=None, responses=VersionSerializer)
+    def post(self, request, pk, numero):
+        documento = get_object_or_404(documentos_visibles(request.user), pk=pk)
+
+        if not tiene_nivel(request.user, documento, "ADMINISTRACION"):
+            raise PermissionDenied("Necesitas permiso de administración para restaurar versiones.")
+
+        origen = get_object_or_404(documento.versiones, numero_version=numero)
+        nueva = guardar_version(documento, request.user, origen.contenido, restaurada_desde=origen)
+        return Response(VersionSerializer(nueva).data, status=status.HTTP_201_CREATED)

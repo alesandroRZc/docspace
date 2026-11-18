@@ -45,7 +45,7 @@ def documentos_visibles(usuario):
         | Q(permisos__usuario=usuario, espacio__miembros__usuario=usuario)
     ).distinct()
 
-def guardar_version(documento, autor, contenido):
+def guardar_version(documento, autor, contenido, restaurada_desde=None):
     with transaction.atomic():
         documento = Documento.objects.select_for_update().get(pk=documento.pk)
 
@@ -55,16 +55,17 @@ def guardar_version(documento, autor, contenido):
         else:
                 siguiente = 1
 
-        version = VersionDocumento.objects.create(documento=documento, autor=autor, contenido=contenido, numero_version=siguiente)
+        version = VersionDocumento.objects.create(documento=documento,autor=autor,contenido=contenido,numero_version=siguiente,restaurada_desde=restaurada_desde,)
     
+        accion = "RESTAURAR_VERSION" if restaurada_desde else "EDITAR_DOCUMENTO"
         registrar_evento(
-                    documento.espacio,
-                    autor,
-                    "EDITAR_DOCUMENTO",
-                    "DOCUMENTO",
-                    documento.id,
-                    {"numero_version": siguiente},
-                )
+            documento.espacio,
+            autor,
+            accion,
+            "DOCUMENTO",
+            documento.id,
+            {"numero_version": siguiente},
+        )
     
         return version
 
