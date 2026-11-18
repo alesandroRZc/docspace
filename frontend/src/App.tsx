@@ -1,10 +1,12 @@
-import { Button, Container, Title } from "@mantine/core";
+import { Navigate, Route, Routes } from "react-router-dom";
+import LoginPage from "./pages/LoginPage";
 
 export default function App() {
   return (
-    <Container py="xl">
-      <Title>DocSpace</Title>
-      <Button mt="md">Hola Mantine</Button>
-    </Container>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/documentos" element={<h1>Documentos (próximamente)</h1>} />
+      <Route path="*" element={<Navigate to="/login" />} />
+    </Routes>
   );
 }
