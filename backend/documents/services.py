@@ -5,6 +5,7 @@ from workspaces.models import MiembroEspacio
 from audit.services import registrar_evento
 
 
+
 JERARQUIA = {
     "LECTURA": 1,
     "EDICION": 2,

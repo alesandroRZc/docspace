@@ -4,6 +4,7 @@ from documents.models import VersionDocumento, Documento, PermisoDocumento
 from documents.services import obtener_nivel, tiene_nivel, guardar_version
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
+from audit.models import BitacoraAuditoria
 
 Usuario = get_user_model()
 
@@ -102,3 +103,15 @@ def test_ciclo_completo_lector_puede_ver_pero_no_guardar():
 
     r = cliente.post(f"/api/documents/{doc.id}/save/", {"contenido": "intento"}, format="json")
     assert r.status_code == 403
+    
+@pytest.mark.django_db
+def test_guardar_registra_evento_en_bitacora():
+    gestor = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    espacio = EspacioTrabajo.objects.create(gestor=gestor, nombre="Espacio A")
+    doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc 1")
+
+    guardar_version(doc, gestor, "Hola")
+
+    eventos = BitacoraAuditoria.objects.filter(recurso_id=doc.id, accion="EDITAR_DOCUMENTO")
+    assert eventos.count() == 1
+    assert eventos.first().usuario == gestor

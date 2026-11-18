@@ -12,6 +12,7 @@ from .services import documentos_visibles, guardar_version, tiene_nivel
 from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError
 from .models import PermisoDocumento
+from audit.services import registrar_evento
 
 Usuario = get_user_model()
 
@@ -33,6 +34,7 @@ class DocumentoListView(generics.ListCreateAPIView):
 
         with transaction.atomic():
             documento = serializer.save(creador=usuario)
+            registrar_evento(espacio, usuario, "CREAR_DOCUMENTO", "DOCUMENTO", documento.id, {"titulo": documento.titulo})
             guardar_version(documento, usuario, "")
 
 
@@ -84,6 +86,18 @@ class AsignarPermisoView(APIView):
             usuario=usuario,
             defaults={"nivel": entrada.validated_data["nivel"]},
         )
+        
+        registrar_evento(
+            documento.espacio,
+            request.user,
+            "CAMBIAR_PERMISO",
+            "PERMISO",
+            permiso.id,
+            {"usuario": usuario.email, "nivel": permiso.nivel},
+        )
+        
         codigo = status.HTTP_201_CREATED if creado else status.HTTP_200_OK
         return Response(PermisoSerializer(permiso).data, status=codigo)
+    
+    
     

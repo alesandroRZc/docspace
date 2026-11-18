@@ -9,6 +9,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .serializers import AgregarMiembroSerializer, EspacioSerializer, MiembroSerializer
+from audit.services import registrar_evento
 
 Usuario = get_user_model()
 
@@ -40,5 +41,7 @@ class AgregarMiembroView(APIView):
             raise NotFound("No existe un usuario con ese correo.")
 
         miembro, creado = MiembroEspacio.objects.get_or_create(espacio=espacio, usuario=usuario)
+        if creado:
+            registrar_evento(espacio, request.user, "AGREGAR_MIEMBRO", "USUARIO", usuario.id, {"email": usuario.email})
         codigo = status.HTTP_201_CREATED if creado else status.HTTP_200_OK
         return Response(MiembroSerializer(miembro).data, status=codigo)
