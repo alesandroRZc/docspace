@@ -42,3 +42,17 @@ def test_lectura_no_puede_editar():
     resultado = tiene_nivel(colab, doc, "EDICION")
 
     assert resultado is False
+  
+@pytest.mark.django_db
+def test_colaborador_con_edicion_puede_editar():
+   
+    gestor = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    espacio = EspacioTrabajo.objects.create(gestor=gestor, nombre="Espacio A")
+    doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc 1")
+    colab = Usuario.objects.create_user(email="c@x.com", username="c", password="Clave12345", nombre="C", tipo_cuenta="COLABORADOR")
+    MiembroEspacio.objects.create(espacio=espacio, usuario=colab)
+    PermisoDocumento.objects.create(documento=doc, usuario=colab, nivel="EDICION")
+
+    resultado = tiene_nivel(colab, doc, "EDICION")
+
+    assert resultado is True

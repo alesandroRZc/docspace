@@ -14,9 +14,10 @@ def obtener_nivel(usuario, documento):
     if documento.espacio.gestor == usuario:
         return PermisoDocumento.Nivel.ADMINISTRACION
     
-    if not  MiembroEspacio.objects.filter(espacio=documento.espacio, usuario=usuario).exists():
+    #Remover Not: "pruebas que realmente fallan si se rompe la lógica"
+    if not MiembroEspacio.objects.filter(espacio=documento.espacio, usuario=usuario).exists():
         return None
-    
+     
     permiso = PermisoDocumento.objects.filter(documento=documento, usuario=usuario).first()
     if permiso is not None:
         return  permiso.nivel
