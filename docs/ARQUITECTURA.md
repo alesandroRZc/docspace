@@ -74,3 +74,8 @@ docspace/
 * Los usuarios registrados con cuenta tipo Colaborador ingresan inicialmente sin espacios asignados, quedando a la espera de ser incorporados mediante invitación directa del Gestor. Un usuario puede pertenecer a múltiples espacios de trabajo simultáneamente.  
 * Las invitaciones y altas de miembros se realizan asociando cuentas de usuario existentes mediante su correo electrónico, o mediante la creación directa de colaboradores por parte del Gestor dentro de su espacio.
 
+## **7\. Aclaraciones confirmadas con el equipo de selección
+
+* No existen límites de espacios ni de usuarios por espacio.
+* Un usuario puede pertenecer a varios espacios (tabla MIEMBRO_ESPACIO).
+* El Gestor tiene control completo y puede revocar cualquier permiso delegado.
