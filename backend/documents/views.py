@@ -50,3 +50,11 @@ class GuardarVersionView(APIView):
 
         version = guardar_version(documento, request.user, entrada.validated_data["contenido"])
         return Response(VersionSerializer(version).data, status=status.HTTP_201_CREATED)
+    
+class VersionListView(generics.ListAPIView):
+    serializer_class = VersionSerializer
+
+    def get_queryset(self):
+        documento = get_object_or_404(documentos_visibles(self.request.user), pk=self.kwargs["pk"])
+        return documento.versiones.all()
+    
