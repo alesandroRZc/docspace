@@ -1,3 +1,44 @@
-from django.test import TestCase
+import pytest
+from workspaces.models import EspacioTrabajo, MiembroEspacio
+from documents.models import Documento, PermisoDocumento
+from documents.services import obtener_nivel, tiene_nivel
+from django.contrib.auth import get_user_model
 
-# Create your tests here.
+Usuario = get_user_model()
+
+@pytest.mark.django_db
+def test_gestor_tiene_administracion():
+   
+    gestor = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    espacio = EspacioTrabajo.objects.create(gestor=gestor, nombre="Espacio A")
+    doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc 1")
+
+    resultado = obtener_nivel(gestor, doc) 
+
+    assert resultado == "ADMINISTRACION"
+    
+@pytest.mark.django_db
+def test_usuario_de_otro_espacio_no_ve_documento():
+   
+    gestor = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    intruso = Usuario.objects.create_user(email= "b@x.com", username="b", password="Clave54321", nombre="B", tipo_cuenta="COLABORADOR")
+    espacio = EspacioTrabajo.objects.create(gestor=gestor, nombre="Espacio A")
+    doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc 1")
+
+    resultado = obtener_nivel(intruso, doc)
+
+    assert resultado is None
+    
+@pytest.mark.django_db
+def test_lectura_no_puede_editar():
+   
+    gestor = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    espacio = EspacioTrabajo.objects.create(gestor=gestor, nombre="Espacio A")
+    doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc 1")
+    colab = Usuario.objects.create_user(email="c@x.com", username="c", password="Clave12345", nombre="C", tipo_cuenta="COLABORADOR")
+    MiembroEspacio.objects.create(espacio=espacio, usuario=colab)
+    PermisoDocumento.objects.create(documento=doc, usuario=colab, nivel="LECTURA")
+
+    resultado = tiene_nivel(colab, doc, "EDICION")
+
+    assert resultado is False
