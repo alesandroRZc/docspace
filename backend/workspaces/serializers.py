@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import EspacioTrabajo, MiembroEspacio
+from accounts.serializers import RegistroSerializer
 
 class EspacioSerializer(serializers.ModelSerializer):
     class Meta:
@@ -15,3 +16,8 @@ class MiembroSerializer(serializers.ModelSerializer):
 
 class AgregarMiembroSerializer(serializers.Serializer):
     email = serializers.EmailField()
+    
+class CrearColaboradorSerializer(RegistroSerializer):
+    
+    class Meta(RegistroSerializer.Meta):
+        fields = ["id", "email", "username", "nombre", "password"]

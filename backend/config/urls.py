@@ -20,7 +20,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView , TokenRefreshView
 from accounts.views import RegistroView
 from documents.views import DocumentoListView, DocumentoDetailView, GuardarVersionView, VersionListView, AsignarPermisoView, CompararVersionesView,  RestaurarVersionView
-from workspaces.views import EspacioListCreateView, AgregarMiembroView
+from workspaces.views import EspacioListCreateView, AgregarMiembroView, CrearColaboradorView
 from audit.views import BitacoraListView
 
 
@@ -41,4 +41,5 @@ urlpatterns = [
     path("api/documents/<uuid:pk>/compare/", CompararVersionesView.as_view(), name="documento-compare"),
     path("api/documents/<uuid:pk>/versions/<int:numero>/restore/", RestaurarVersionView.as_view(), name="documento-restore"),
     path("api/audit/", BitacoraListView.as_view(), name="bitacora-list"),
+    path("api/workspaces/<uuid:pk>/members/create/", CrearColaboradorView.as_view(), name="espacio-crear-colaborador"),
 ]

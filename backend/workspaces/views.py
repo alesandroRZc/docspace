@@ -8,8 +8,9 @@ from rest_framework import status
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .serializers import AgregarMiembroSerializer, EspacioSerializer, MiembroSerializer
+from .serializers import AgregarMiembroSerializer, EspacioSerializer, MiembroSerializer, CrearColaboradorSerializer
 from audit.services import registrar_evento
+from django.db import transaction
 
 Usuario = get_user_model()
 
@@ -45,3 +46,21 @@ class AgregarMiembroView(APIView):
             registrar_evento(espacio, request.user, "AGREGAR_MIEMBRO", "USUARIO", usuario.id, {"email": usuario.email})
         codigo = status.HTTP_201_CREATED if creado else status.HTTP_200_OK
         return Response(MiembroSerializer(miembro).data, status=codigo)
+    
+class CrearColaboradorView(APIView):
+    @extend_schema(request=CrearColaboradorSerializer, responses=MiembroSerializer)
+    def post(self, request, pk):
+        espacio = get_object_or_404(EspacioTrabajo.objects.filter(miembros__usuario=request.user), pk=pk)
+
+        if espacio.gestor != request.user:
+            raise PermissionDenied("Solo el Gestor del espacio puede crear colaboradores.")
+
+        entrada = CrearColaboradorSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            usuario = entrada.save(tipo_cuenta="COLABORADOR")
+            miembro = MiembroEspacio.objects.create(espacio=espacio, usuario=usuario)
+            registrar_evento(espacio, request.user, "CREAR_USUARIO", "USUARIO", usuario.id, {"email": usuario.email})
+
+        return Response(MiembroSerializer(miembro).data, status=status.HTTP_201_CREATED)
