@@ -1,8 +1,8 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, Card, Container, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import { api, cerrarSesion } from "../api/cliente";
 import type { Documento } from "../api/tipos";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export default function DocumentosPage() {
   const navigate = useNavigate();
@@ -20,11 +20,11 @@ export default function DocumentosPage() {
         <Button
           variant="light"
           color="red"
-                  onClick={() => {
-          cerrarSesion();
-          queryClient.clear();
-          navigate("/login");
-        }}
+          onClick={() => {
+            cerrarSesion();
+            queryClient.clear();
+            navigate("/login");
+          }}
         >
           Cerrar sesión
         </Button>
