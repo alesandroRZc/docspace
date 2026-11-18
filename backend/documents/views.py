@@ -7,8 +7,8 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .serializers import DocumentoSerializer, GuardarVersionSerializer, VersionSerializer, AsignarPermisoSerializer, PermisoSerializer
-from .services import documentos_visibles, guardar_version, tiene_nivel
+from .serializers import DocumentoSerializer, GuardarVersionSerializer, VersionSerializer, AsignarPermisoSerializer, PermisoSerializer, CompararSerializer
+from .services import documentos_visibles, guardar_version, tiene_nivel, comparar_versiones
 from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError
 from .models import PermisoDocumento
@@ -99,5 +99,20 @@ class AsignarPermisoView(APIView):
         codigo = status.HTTP_201_CREATED if creado else status.HTTP_200_OK
         return Response(PermisoSerializer(permiso).data, status=codigo)
     
-    
+class CompararVersionesView(APIView):
+    @extend_schema(parameters=[CompararSerializer])
+    def get(self, request, pk):
+        documento = get_object_or_404(documentos_visibles(request.user), pk=pk)
+
+        entrada = CompararSerializer(data=request.query_params)
+        entrada.is_valid(raise_exception=True)
+
+        version_a = get_object_or_404(documento.versiones, numero_version=entrada.validated_data["a"])
+        version_b = get_object_or_404(documento.versiones, numero_version=entrada.validated_data["b"])
+
+        return Response({
+            "version_a": version_a.numero_version,
+            "version_b": version_b.numero_version,
+            "diferencias": comparar_versiones(version_a, version_b),
+        })
     

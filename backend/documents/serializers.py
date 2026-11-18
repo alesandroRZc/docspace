@@ -24,3 +24,7 @@ class PermisoSerializer(serializers.ModelSerializer):
 class AsignarPermisoSerializer(serializers.Serializer):
     email = serializers.EmailField()
     nivel = serializers.ChoiceField(choices=PermisoDocumento.Nivel.choices)
+    
+class CompararSerializer(serializers.Serializer):
+    a = serializers.IntegerField(min_value=1)
+    b = serializers.IntegerField(min_value=1)

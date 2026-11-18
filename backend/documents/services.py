@@ -3,7 +3,7 @@ from django.db import transaction
 from .models import Documento, PermisoDocumento, VersionDocumento
 from workspaces.models import MiembroEspacio
 from audit.services import registrar_evento
-
+import difflib
 
 
 JERARQUIA = {
@@ -67,4 +67,14 @@ def guardar_version(documento, autor, contenido):
                 )
     
         return version
+
+def comparar_versiones(version_a, version_b):
+    lineas = difflib.unified_diff(
+        version_a.contenido.splitlines(),
+        version_b.contenido.splitlines(),
+        fromfile=f"v{version_a.numero_version}",
+        tofile=f"v{version_b.numero_version}",
+        lineterm="",
+    )
+    return list(lineas)
     

@@ -19,7 +19,7 @@ from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView , TokenRefreshView
 from accounts.views import RegistroView
-from documents.views import DocumentoListView, DocumentoDetailView, GuardarVersionView, VersionListView, AsignarPermisoView
+from documents.views import DocumentoListView, DocumentoDetailView, GuardarVersionView, VersionListView, AsignarPermisoView, CompararVersionesView
 from workspaces.views import EspacioListCreateView, AgregarMiembroView
 
 
@@ -38,4 +38,5 @@ urlpatterns = [
     path("api/documents/<uuid:pk>/versions/", VersionListView.as_view(), name="documento-versions"),
     path("api/workspaces/<uuid:pk>/members/", AgregarMiembroView.as_view(), name="espacio-members"),
     path("api/documents/<uuid:pk>/permissions/", AsignarPermisoView.as_view(), name="documento-permissions"),
+    path("api/documents/<uuid:pk>/compare/", CompararVersionesView.as_view(), name="documento-compare"),
 ]
