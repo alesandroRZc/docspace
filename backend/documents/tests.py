@@ -1,7 +1,7 @@
 import pytest
 from workspaces.models import EspacioTrabajo, MiembroEspacio
-from documents.models import Documento, PermisoDocumento
-from documents.services import obtener_nivel, tiene_nivel
+from documents.models import VersionDocumento, Documento, PermisoDocumento
+from documents.services import obtener_nivel, tiene_nivel, guardar_version
 from django.contrib.auth import get_user_model
 
 Usuario = get_user_model()
@@ -56,3 +56,25 @@ def test_colaborador_con_edicion_puede_editar():
     resultado = tiene_nivel(colab, doc, "EDICION")
 
     assert resultado is True
+    
+@pytest.mark.django_db   
+def test_guardar_crea_versiones_consecutivas():
+    gestor = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    espacio = EspacioTrabajo.objects.create(gestor=gestor, nombre="Espacio A")
+    doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc 1")
+    v1 = guardar_version(doc, gestor, "Hola")
+    v2 = guardar_version(doc, gestor, "Hola mundo")
+    assert v1.numero_version == 1
+    assert v2.numero_version == 2
+    assert VersionDocumento.objects.filter(documento=doc).count() == 2
+    
+@pytest.mark.django_db   
+def test_version_es_inmutable():
+    gestor = Usuario.objects.create_user(email="a@x.com", username="a", password="Clave12345", nombre="A", tipo_cuenta="GESTOR")
+    espacio = EspacioTrabajo.objects.create(gestor=gestor, nombre="Espacio A")
+    doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc 1")
+    v1 = guardar_version(doc, gestor, "Hola")
+
+    v1.contenido = "Modificado"
+    with pytest.raises(ValueError):
+        v1.save()

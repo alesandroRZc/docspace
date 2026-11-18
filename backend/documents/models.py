@@ -12,7 +12,7 @@ class Documento(models.Model):
     fecha_actualizacion = models.DateTimeField(auto_now=True)
     eliminado_en = models.DateTimeField(null=True, blank=True)
     
-class VersionesDocumento(models.Model):
+class VersionDocumento(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     documento = models.ForeignKey(Documento, on_delete=models.PROTECT, related_name="versiones")
     autor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="versiones_creadas")
