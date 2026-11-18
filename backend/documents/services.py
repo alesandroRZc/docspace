@@ -2,7 +2,7 @@ from django.db.models import Q
 from django.db import transaction
 from .models import Documento, PermisoDocumento, VersionDocumento
 from workspaces.models import MiembroEspacio
-from .models import Documento, PermisoDocumento
+from audit.services import registrar_evento
 
 
 JERARQUIA = {
@@ -55,4 +55,15 @@ def guardar_version(documento, autor, contenido):
                 siguiente = 1
 
         version = VersionDocumento.objects.create(documento=documento, autor=autor, contenido=contenido, numero_version=siguiente)
+    
+        registrar_evento(
+                    documento.espacio,
+                    autor,
+                    "EDITAR_DOCUMENTO",
+                    "DOCUMENTO",
+                    documento.id,
+                    {"numero_version": siguiente},
+                )
+    
         return version
+    
