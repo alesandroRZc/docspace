@@ -20,6 +20,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView , TokenRefreshView
 from accounts.views import RegistroView
 from documents.views import DocumentoListView, DocumentoDetailView
+from workspaces.views import EspacioListCreateView
 
 
 urlpatterns = [
@@ -31,4 +32,5 @@ urlpatterns = [
     path('api/auth/register/', RegistroView.as_view(), name="register"),
     path('api/documents/', DocumentoListView.as_view(), name="documento-list"),
     path('api/documents/<uuid:pk>/', DocumentoDetailView.as_view(), name="documento-detail"),
+    path("api/workspaces/", EspacioListCreateView.as_view(), name="documento-create"),
 ]
