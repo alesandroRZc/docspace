@@ -21,3 +21,12 @@ export function tieneNivel(nivel: Nivel | null, minimo: Nivel) {
   if (nivel === null) return false;
   return JERARQUIA[nivel] >= JERARQUIA[minimo];
 }
+
+export type Version = {
+  id: string;
+  numero_version: number;
+  contenido: string;
+  autor: string;
+  fecha_creacion: string;
+  restaurada_desde: string | null;
+};

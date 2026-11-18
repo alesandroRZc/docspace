@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Anchor, Badge, Button, Container, Group, Loader, Stack, Textarea, Title } from "@mantine/core";
 import { api } from "../api/cliente";
 import { tieneNivel, type Documento } from "../api/tipos";
+import HistorialVersiones from "../components/HistorialVersiones";
 
 export default function DocumentoPage() {
   const { id } = useParams();
@@ -73,6 +74,7 @@ export default function DocumentoPage() {
             </Button>
           </Group>
         )}
+        <HistorialVersiones documentoId={documento.id} miPermiso={documento.mi_permiso} />
       </Stack>
     </Container>
   );
