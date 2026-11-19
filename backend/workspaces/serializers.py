@@ -5,8 +5,9 @@ from accounts.serializers import RegistroSerializer
 class EspacioSerializer(serializers.ModelSerializer):
     class Meta:
         model = EspacioTrabajo
-        fields = ["id", "nombre", "fecha_creacion"]
-        read_only_fields = ["id", "fecha_creacion"]
+        fields = ["id", "nombre", "gestor", "fecha_creacion"]
+        read_only_fields = ["id", "gestor", "fecha_creacion"]
+        
         
 class MiembroSerializer(serializers.ModelSerializer):
     class Meta:

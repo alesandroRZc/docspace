@@ -12,3 +12,8 @@ class RegistroSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         return Usuario.objects.create_user(**validated_data)
     
+class UsuarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Usuario
+        fields = ["id", "email", "username", "nombre", "tipo_cuenta"]
+    
