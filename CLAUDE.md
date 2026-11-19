@@ -35,6 +35,7 @@
 - Todo cambio de backend lleva su prueba. Todas las pruebas existentes deben seguir pasando.
 - No modificar archivos fuera del plan aprobado sin avisarme antes y explicar por qué.
 - Crear y modificar archivos siempre con la herramienta de edición, nunca con comandos de shell (`cat >>`, `echo >`, `sed`), para que cada cambio pase por mi revisión del diff.
+- Al terminar cada paso, además de correr las pruebas, verificar con `docker compose logs backend --tail 20` que el servidor en ejecución arrancó sin errores (la recarga automática puede quedar caída si se recarga a mitad de una edición de varios archivos).
 
 ## Decisiones de la Fase 2
 - Tiempo real con **Django Channels** (WebSockets) y **Redis** como channel layer (servicio nuevo en Compose).
