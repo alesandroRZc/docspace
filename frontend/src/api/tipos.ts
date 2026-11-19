@@ -36,3 +36,18 @@ export type Comparacion = {
   version_b: number;
   diferencias: string[];
 };
+
+export type Usuario = {
+  id: string;
+  email: string;
+  username: string;
+  nombre: string;
+  tipo_cuenta: "GESTOR" | "COLABORADOR";
+};
+
+export type Espacio = {
+  id: string;
+  nombre: string;
+  gestor: string;
+  fecha_creacion: string;
+};

@@ -2,7 +2,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, Card, Container, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import { api, cerrarSesion } from "../api/cliente";
-import type { Documento } from "../api/tipos";
+import type { Documento, Usuario } from "../api/tipos";
+import PanelGestor from "../components/PanelGestor";
 
 export default function DocumentosPage() {
   const navigate = useNavigate();
@@ -13,10 +14,22 @@ export default function DocumentosPage() {
     queryFn: () => api<Documento[]>("/documents/"),
   });
 
+  const { data: yo } = useQuery({
+    queryKey: ["yo"],
+    queryFn: () => api<Usuario>("/auth/me/"),
+  });
+
   return (
     <Container py="xl">
       <Group justify="space-between" mb="lg">
-        <Title>Mis documentos</Title>
+        <div>
+          <Title>Mis documentos</Title>
+          {yo && (
+            <Text c="dimmed" size="sm">
+              {yo.nombre} · {yo.tipo_cuenta === "GESTOR" ? "Gestor" : "Colaborador"}
+            </Text>
+          )}
+        </div>        
         <Button
           variant="light"
           color="red"
@@ -29,6 +42,8 @@ export default function DocumentosPage() {
           Cerrar sesión
         </Button>
       </Group>
+
+      {yo?.tipo_cuenta === "GESTOR" && <PanelGestor yo={yo} />}
 
       {isLoading && <Loader />}
       {error && <Alert color="red">No se pudieron cargar los documentos.</Alert>}
