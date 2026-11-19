@@ -184,23 +184,133 @@ async def pedir_turno(usuario, documento_id, canal, nivel):
     return "ya_tuyo", turno_publico(vigente)
 
 
-async def renovar_turno(documento_id, canal):
-    """Solo se llama ante un "editar" del dueño. El latido nunca renueva el turno."""
-    return await estado_vivo.renovar_turno(documento_id, canal, ttl_turno())
-
-
-async def liberar_turno(documento_id, canal):
-    """True si el turno era de este canal y se liberó."""
-    return await estado_vivo.liberar_turno(documento_id, canal)
-
-
-async def detectar_turno_vencido(documento_id):
-    """Si el turno venció sin liberarse, devuelve quién lo tenía (una sola vez)."""
-    return await estado_vivo.detectar_turno_vencido(documento_id)
-
-
 async def turno_vigente(documento_id):
     return turno_publico(await estado_vivo.turno_actual(documento_id))
+
+
+# --- Edición en vivo y guardado al terminar el turno ------------------------
+
+class ContenidoDemasiadoGrande(Exception):
+    pass
+
+
+def max_caracteres_edicion():
+    return getattr(settings, "EDITAR_MAX_CARACTERES", 200_000)
+
+
+async def aplicar_edicion(documento_id, canal, contenido):
+    """
+    Edición en vivo del dueño del turno: renueva el turno y actualiza el
+    borrador. NO crea versión. Es lo único que renueva el turno (el latido no).
+    Devuelve 'renovado', 'ajeno' o 'vencido'.
+    """
+    if len(contenido) > max_caracteres_edicion():
+        raise ContenidoDemasiadoGrande()
+    return await estado_vivo.aplicar_edicion(documento_id, canal, contenido, ttl_turno())
+
+
+async def borrador_en_vivo(documento_id):
+    """Texto que se está editando ahora mismo (para quien se conecta a mitad)."""
+    turno = await estado_vivo.turno_actual(documento_id)
+    borrador = await estado_vivo.leer_borrador(documento_id)
+    if turno is None or borrador is None or borrador["canal"] != turno["canal"]:
+        return None
+    return {"contenido": borrador["contenido"], **turno_publico(turno)}
+
+
+@database_sync_to_async
+def _guardar_borrador(documento_id, borrador, automatico):
+    """
+    Convierte el borrador en versión con guardar_version() y control optimista.
+    Devuelve un dict con "estado": guardada | sin_cambios | conflicto | sin_permiso.
+    """
+    documento = Documento.objects.select_related("espacio").get(pk=documento_id)
+    autor = Usuario.objects.filter(pk=borrador["usuario_id"]).first()
+    resultado = {"autor": borrador["nombre"]}
+
+    # El permiso se vuelve a comprobar al guardar: pudo cambiar desde la edición.
+    if autor is None or not tiene_nivel(autor, documento, PermisoDocumento.Nivel.EDICION):
+        registrar_evento(documento.espacio, autor, "BORRADOR_DESCARTADO", "DOCUMENTO", documento.id,
+                         {"motivo": "sin_permiso", "version_base": borrador["version_base"]})
+        return {**resultado, "estado": "sin_permiso"}
+
+    ultima = documento.versiones.first()
+    if (ultima.contenido if ultima is not None else "") == borrador["contenido"]:
+        return {**resultado, "estado": "sin_cambios"}
+
+    try:
+        version = guardar_version(documento, autor, borrador["contenido"], version_base=borrador["version_base"])
+    except ConflictoVersion as conflicto:
+        if automatico:
+            # Nadie puede decidir ahora: el texto se conserva en la bitácora en
+            # vez de tapar la otra versión o perderse.
+            registrar_evento(documento.espacio, autor, "BORRADOR_EN_CONFLICTO", "DOCUMENTO", documento.id, {
+                "version_base": borrador["version_base"],
+                "version_actual": conflicto.version_actual,
+                "contenido": borrador["contenido"],
+            })
+        return {**resultado, "estado": "conflicto",
+                "version_actual": conflicto.version_actual, "contenido_actual": conflicto.contenido_actual}
+
+    return {**resultado, "estado": "guardada", "numero_version": version.numero_version}
+
+
+@database_sync_to_async
+def _registrar_descarte(documento_id, borrador):
+    documento = Documento.objects.select_related("espacio").get(pk=documento_id)
+    autor = Usuario.objects.filter(pk=borrador["usuario_id"]).first()
+    registrar_evento(documento.espacio, autor, "DESCARTAR_BORRADOR", "DOCUMENTO", documento.id,
+                     {"version_base": borrador["version_base"]})
+
+
+async def terminar_turno(documento_id, canal, *, version_confirmada=None, descartar=False, automatico=False):
+    """
+    Libera el turno de este canal guardando antes su borrador como versión.
+
+    - Manual (botón Guardar): ante un conflicto NO libera nada; el editor
+      conserva turno y borrador y decide (reintentar confirmando la versión que
+      ya vio con `version_confirmada`, o `descartar`).
+    - Automático (desconexión): ante un conflicto el texto queda en la bitácora
+      y el turno se libera.
+    Devuelve un dict con "estado" (además de los de _guardar_borrador:
+    sin_turno | descartado).
+    """
+    turno = await estado_vivo.turno_actual(documento_id)
+    if turno is None or turno["canal"] != canal:
+        return {"estado": "sin_turno"}
+
+    borrador = await estado_vivo.leer_borrador(documento_id)
+    if borrador is None or borrador["canal"] != canal:
+        resultado = {"estado": "sin_cambios", "autor": turno["nombre"]}
+    elif descartar:
+        await _registrar_descarte(documento_id, borrador)
+        resultado = {"estado": "descartado", "autor": turno["nombre"]}
+    else:
+        if version_confirmada is not None:
+            borrador["version_base"] = version_confirmada
+        resultado = await _guardar_borrador(documento_id, borrador, automatico)
+        if resultado["estado"] == "conflicto" and not automatico:
+            return resultado
+
+    await estado_vivo.liberar_turno(documento_id, canal)
+    return resultado
+
+
+async def procesar_turno_vencido(documento_id):
+    """
+    Si el turno venció sin liberarse (inactividad o caída del proceso), guarda
+    su borrador a nombre de su autor. Devuelve None si no venció nada; si no,
+    el resultado del guardado. Solo una conexión lo procesa (Lua atómico).
+    """
+    detectado = await estado_vivo.detectar_turno_vencido(documento_id)
+    if detectado is None:
+        return None
+    anterior, borrador = detectado
+    if borrador is None or borrador["canal"] != anterior["canal"]:
+        return {"estado": "sin_cambios", "autor": anterior["nombre"]}
+    resultado = await _guardar_borrador(documento_id, borrador, automatico=True)
+    await estado_vivo.borrar_borrador(documento_id, borrador["canal"])
+    return resultado
 
 
 def comparar_versiones(version_a, version_b):

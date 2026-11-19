@@ -17,6 +17,9 @@ Turno de edición: string "doc:{id}:turno" con TTL
   únicamente ante un "editar"); si nadie edita, Redis lo expira solo.
 Marcador "doc:{id}:turno:anunciado": recuerda que hubo un turno anunciado,
   para detectar que venció (Redis borra la clave del turno sin avisar).
+Borrador "doc:{id}:borrador": JSON del turno + "contenido" en vivo. Lo escribe
+  solo el dueño del turno con cada "editar" y sobrevive al turno (TTL largo),
+  para que el texto no se pierda si el turno vence o el proceso se cae.
 Todas las operaciones del turno son scripts Lua: atómicas aunque haya varios
 procesos atendiendo el mismo documento.
 """
@@ -74,11 +77,15 @@ async def usuarios_presentes(documento_id, ttl, ahora=None):
 
 # --- Turno de edición ---------------------------------------------------------
 
-ANUNCIO_TTL = 24 * 60 * 60  # el marcador solo debe sobrevivir al turno
+ANUNCIO_TTL = 24 * 60 * 60  # marcador y borrador deben sobrevivir al turno
 
 
 def _claves_turno(documento_id):
-    return [f"doc:{documento_id}:turno", f"doc:{documento_id}:turno:anunciado"]
+    return [
+        f"doc:{documento_id}:turno",
+        f"doc:{documento_id}:turno:anunciado",
+        f"doc:{documento_id}:borrador",
+    ]
 
 
 # Toma el turno si está libre. Devuelve el turno vigente (el propio o el ajeno).
@@ -91,28 +98,50 @@ end
 return actual
 """
 
-# Renueva el TTL solo si el turno es de este canal.
-_RENOVAR = """
+# Edición del dueño: renueva el turno y guarda el borrador, en un solo paso.
+# Si el canal no es el dueño (o no hay turno) no toca nada.
+_EDITAR = """
 local actual = redis.call('GET', KEYS[1])
 if not actual then return 'vencido' end
-if cjson.decode(actual)['canal'] ~= ARGV[1] then return 'ajeno' end
+local turno = cjson.decode(actual)
+if turno['canal'] ~= ARGV[1] then return 'ajeno' end
 redis.call('EXPIRE', KEYS[1], ARGV[2])
+redis.call('EXPIRE', KEYS[2], ARGV[4])
+turno['contenido'] = ARGV[3]
+redis.call('SET', KEYS[3], cjson.encode(turno), 'EX', ARGV[4])
 return 'renovado'
 """
 
-# Comparar y borrar: solo el canal dueño puede liberar.
+# Comparar y borrar: solo el canal dueño puede liberar. El borrador se borra
+# solo si es de ese mismo canal (nunca el de otro editor posterior).
 _LIBERAR = """
 local actual = redis.call('GET', KEYS[1])
 if not actual or cjson.decode(actual)['canal'] ~= ARGV[1] then return 0 end
 redis.call('DEL', KEYS[1], KEYS[2])
+local borrador = redis.call('GET', KEYS[3])
+if borrador and cjson.decode(borrador)['canal'] == ARGV[1] then
+  redis.call('DEL', KEYS[3])
+end
 return 1
 """
 
 # Si el turno ya no existe pero estaba anunciado, venció: consumir el marcador
-# (una sola conexión lo recibe) y devolver quién lo tenía.
+# (una sola conexión lo recibe) y devolver quién lo tenía y su borrador.
 _DETECTAR_VENCIDO = """
 if redis.call('EXISTS', KEYS[1]) == 1 then return false end
-return redis.call('GETDEL', KEYS[2])
+local anterior = redis.call('GETDEL', KEYS[2])
+if not anterior then return false end
+return {anterior, redis.call('GET', KEYS[3]) or ''}
+"""
+
+# Borra el borrador solo si pertenece al canal indicado.
+_BORRAR_BORRADOR = """
+local borrador = redis.call('GET', KEYS[3])
+if borrador and cjson.decode(borrador)['canal'] == ARGV[1] then
+  redis.call('DEL', KEYS[3])
+  return 1
+end
+return 0
 """
 
 
@@ -122,26 +151,41 @@ def _decodificar(valor):
 
 async def tomar_turno(documento_id, datos, ttl):
     async with _conexion() as r:
-        actual = await r.eval(_TOMAR, 2, *_claves_turno(documento_id), json.dumps(datos), ttl, ANUNCIO_TTL)
+        actual = await r.eval(_TOMAR, 3, *_claves_turno(documento_id), json.dumps(datos), ttl, ANUNCIO_TTL)
     return _decodificar(actual)
 
 
-async def renovar_turno(documento_id, canal, ttl):
+async def aplicar_edicion(documento_id, canal, contenido, ttl):
     """Devuelve 'renovado', 'ajeno' (lo tiene otro) o 'vencido' (no hay turno)."""
     async with _conexion() as r:
-        return await r.eval(_RENOVAR, 2, *_claves_turno(documento_id), canal, ttl)
+        return await r.eval(_EDITAR, 3, *_claves_turno(documento_id), canal, ttl, contenido, ANUNCIO_TTL)
 
 
 async def liberar_turno(documento_id, canal):
     async with _conexion() as r:
-        return bool(await r.eval(_LIBERAR, 2, *_claves_turno(documento_id), canal))
+        return bool(await r.eval(_LIBERAR, 3, *_claves_turno(documento_id), canal))
 
 
 async def detectar_turno_vencido(documento_id):
+    """None si no venció nada; si venció, (turno anterior, borrador o None)."""
     async with _conexion() as r:
-        return _decodificar(await r.eval(_DETECTAR_VENCIDO, 2, *_claves_turno(documento_id)))
+        resultado = await r.eval(_DETECTAR_VENCIDO, 3, *_claves_turno(documento_id))
+    if not resultado:
+        return None
+    anterior, borrador = resultado
+    return _decodificar(anterior), _decodificar(borrador)
+
+
+async def borrar_borrador(documento_id, canal):
+    async with _conexion() as r:
+        return bool(await r.eval(_BORRAR_BORRADOR, 3, *_claves_turno(documento_id), canal))
 
 
 async def turno_actual(documento_id):
     async with _conexion() as r:
         return _decodificar(await r.get(_claves_turno(documento_id)[0]))
+
+
+async def leer_borrador(documento_id):
+    async with _conexion() as r:
+        return _decodificar(await r.get(_claves_turno(documento_id)[2]))

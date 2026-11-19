@@ -12,9 +12,11 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
+from audit.models import BitacoraAuditoria
 from config.asgi import application
 from documents import estado_vivo
-from documents.models import Documento, PermisoDocumento
+from documents.models import Documento, PermisoDocumento, VersionDocumento
+from documents.services import guardar_version
 from workspaces.models import EspacioTrabajo, MiembroEspacio
 
 Usuario = get_user_model()
@@ -546,7 +548,7 @@ def test_editar_del_dueno_si_renueva_el_turno(escenario, settings):
         await recibir_tipo(ws_b, "turno")
 
         await asyncio.sleep(1.0)
-        await ws_a.send_json_to({"tipo": "editar"})
+        await ws_a.send_json_to({"tipo": "editar", "contenido": "hola"})
         await asyncio.sleep(1.3)
 
         await ws_b.send_json_to({"tipo": "pedir_turno"})
@@ -568,7 +570,7 @@ def test_editar_con_el_turno_vencido_responde_turno_vencido(escenario, settings)
         await ws.send_json_to({"tipo": "pedir_turno"})
         await recibir_tipo(ws, "turno")
         await asyncio.sleep(1.3)
-        await ws.send_json_to({"tipo": "editar"})
+        await ws.send_json_to({"tipo": "editar", "contenido": "hola"})
         error = await recibir_tipo(ws, "error")
         await ws.disconnect()
         return error
@@ -577,3 +579,332 @@ def test_editar_con_el_turno_vencido_responde_turno_vencido(escenario, settings)
 
     assert error["codigo"] == 409
     assert error["motivo"] == "turno_vencido"
+
+
+# --- Edición en vivo y guardado al terminar el turno ------------------------
+
+def versiones_de(doc):
+    return list(VersionDocumento.objects.filter(documento=doc).order_by("numero_version"))
+
+
+def eventos(doc, accion):
+    return list(BitacoraAuditoria.objects.filter(recurso_id=doc.id, accion=accion))
+
+
+async def pendientes(ws, espera=0.3):
+    """Todos los mensajes JSON que llegan en `espera` segundos."""
+    mensajes = []
+    while not await ws.receive_nothing(timeout=espera):
+        mensajes.append(await ws.receive_json_from())
+    return mensajes
+
+
+async def con_turno(doc, usuario):
+    """Abre una conexión y toma el turno."""
+    ws, _ = await abrir(doc.id, usuario)
+    await ws.send_json_to({"tipo": "pedir_turno"})
+    await recibir_tipo(ws, "turno")
+    return ws
+
+
+@pytest.mark.django_db(transaction=True)
+def test_editar_llega_a_los_demas_y_no_crea_version(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_editor = await con_turno(doc, escenario["editor"])
+        ws_lector, _ = await abrir(doc.id, escenario["lector"])
+        for texto in ["H", "Ho", "Hola"]:
+            await ws_editor.send_json_to({"tipo": "editar", "contenido": texto})
+        recibidos = [(await recibir_tipo(ws_lector, "cambio"))["contenido"] for _ in range(3)]
+        pendientes_editor = await pendientes(ws_editor)
+        versiones_antes_de_cerrar = await database_sync_to_async(versiones_de)(doc)
+        await ws_lector.disconnect()
+        await ws_editor.disconnect()
+        return recibidos, pendientes_editor, versiones_antes_de_cerrar
+
+    recibidos, pendientes_editor, versiones = async_to_sync(probar)()
+
+    assert recibidos == ["H", "Ho", "Hola"]
+    # El editor no recibe su propio cambio de vuelta.
+    assert "cambio" not in [m["tipo"] for m in pendientes_editor], pendientes_editor
+    assert versiones == []  # ninguna versión por tecla mientras edita
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("infractor, observador, codigo", [
+    ("lector", "gestor", 403),   # sin permiso de edición
+    ("gestor", "lector", 409),   # con permiso, pero sin el turno
+])
+def test_editar_rechazado_no_se_retransmite(escenario, infractor, observador, codigo):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_dueno = await con_turno(doc, escenario["editor"])
+        ws_infractor, _ = await abrir(doc.id, escenario[infractor])
+        ws_observador, _ = await abrir(doc.id, escenario[observador])
+        await ws_infractor.send_json_to({"tipo": "editar", "contenido": "intruso"})
+        error = await recibir_tipo(ws_infractor, "error")
+        await ws_dueno.send_json_to({"tipo": "editar", "contenido": "legitimo"})
+        primero = await recibir_tipo(ws_observador, "cambio")
+        borrador = await estado_vivo.leer_borrador(doc.id)
+        for ws in (ws_dueno, ws_infractor, ws_observador):
+            await ws.disconnect()
+        return error, primero, borrador
+
+    error, primero, borrador = async_to_sync(probar)()
+
+    assert error["codigo"] == codigo
+    assert primero["contenido"] == "legitimo"   # "intruso" nunca llegó
+    assert borrador["contenido"] == "legitimo"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_editar_demasiado_grande_responde_413(escenario, settings):
+    settings.EDITAR_MAX_CARACTERES = 10
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_editor = await con_turno(doc, escenario["editor"])
+        ws_lector, _ = await abrir(doc.id, escenario["lector"])
+        await ws_editor.send_json_to({"tipo": "editar", "contenido": "corto"})
+        await recibir_tipo(ws_lector, "cambio")
+        await ws_editor.send_json_to({"tipo": "editar", "contenido": "x" * 11})
+        error = await recibir_tipo(ws_editor, "error")
+        nada_mas = await ws_lector.receive_nothing(timeout=0.3)
+        borrador = await estado_vivo.leer_borrador(doc.id)
+        await ws_editor.disconnect()
+        await ws_lector.disconnect()
+        return error, nada_mas, borrador
+
+    error, nada_mas, borrador = async_to_sync(probar)()
+
+    assert error["codigo"] == 413
+    assert nada_mas                          # no se retransmitió
+    assert borrador["contenido"] == "corto"  # ni se guardó en el borrador
+
+
+@pytest.mark.django_db(transaction=True)
+def test_quien_se_conecta_a_mitad_recibe_el_borrador_en_vivo(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_editor = await con_turno(doc, escenario["editor"])
+        await ws_editor.send_json_to({"tipo": "editar", "contenido": "a medio escribir"})
+        await asyncio.sleep(0.2)
+        ws_nuevo = comunicador(doc.id, token_de(escenario["lector"]))
+        await ws_nuevo.connect()
+        cambio = await recibir_tipo(ws_nuevo, "cambio")
+        await ws_nuevo.disconnect()
+        await ws_editor.disconnect()
+        return cambio
+
+    cambio = async_to_sync(probar)()
+
+    assert cambio["contenido"] == "a medio escribir"
+    assert cambio["nombre"] == "editor"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_liberar_crea_exactamente_una_version_y_todos_la_ven(escenario):
+    doc, editor = escenario["doc"], escenario["editor"]
+
+    async def probar():
+        ws_editor = await con_turno(doc, editor)
+        ws_lector, _ = await abrir(doc.id, escenario["lector"])
+        for texto in ["Uno", "Uno dos", "Uno dos tres"]:
+            await ws_editor.send_json_to({"tipo": "editar", "contenido": texto})
+        await ws_editor.send_json_to({"tipo": "liberar_turno"})
+        aviso = await recibir_tipo(ws_lector, "version_guardada")
+        turno = await estado_vivo.turno_actual(doc.id)
+        borrador = await estado_vivo.leer_borrador(doc.id)
+        await ws_editor.disconnect()
+        await ws_lector.disconnect()
+        return aviso, turno, borrador
+
+    aviso, turno, borrador = async_to_sync(probar)()
+
+    versiones = versiones_de(doc)
+    assert [v.contenido for v in versiones] == ["Uno dos tres"]
+    assert versiones[0].autor == editor
+    assert aviso == {"tipo": "version_guardada", "numero_version": 1, "autor": "editor"}
+    assert len(eventos(doc, "EDITAR_DOCUMENTO")) == 1
+    assert turno is None and borrador is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_liberar_sin_cambios_no_crea_version(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws = await con_turno(doc, escenario["editor"])
+        await ws.send_json_to({"tipo": "liberar_turno"})
+        libre = await recibir_tipo(ws, "turno")
+        await ws.disconnect()
+        return libre
+
+    assert quien(async_to_sync(probar)()) is None
+    assert versiones_de(doc) == []
+
+
+@pytest.mark.django_db(transaction=True)
+def test_conflicto_manual_conserva_turno_y_borrador_y_se_resuelve_confirmando(escenario):
+    doc, editor, gestor = escenario["doc"], escenario["editor"], escenario["gestor"]
+    guardar_por_rest = database_sync_to_async(lambda: guardar_version(doc, gestor, "cambio de otro"))
+
+    async def probar():
+        ws = await con_turno(doc, editor)  # base: versión 0
+        await ws.send_json_to({"tipo": "editar", "contenido": "mi texto"})
+        await asyncio.sleep(0.2)
+        await guardar_por_rest()           # alguien guarda la v1 por REST
+        await ws.send_json_to({"tipo": "liberar_turno"})
+        conflicto = await recibir_tipo(ws, "conflicto")
+        turno = await estado_vivo.turno_actual(doc.id)
+        borrador = await estado_vivo.leer_borrador(doc.id)
+        # El editor revisa la v1 y confirma que quiere guardar encima de ella.
+        await ws.send_json_to({"tipo": "liberar_turno", "version_base": conflicto["version_actual"]})
+        guardada = await recibir_tipo(ws, "version_guardada")
+        await ws.disconnect()
+        return conflicto, turno, borrador, guardada
+
+    conflicto, turno, borrador, guardada = async_to_sync(probar)()
+
+    assert conflicto["version_actual"] == 1
+    assert conflicto["contenido_actual"] == "cambio de otro"
+    assert turno["nombre"] == "editor"           # conserva el turno
+    assert borrador["contenido"] == "mi texto"   # y su texto
+    assert guardada["numero_version"] == 2
+    assert [v.contenido for v in versiones_de(doc)] == ["cambio de otro", "mi texto"]
+    assert len(eventos(doc, "CONFLICTO_VERSION")) == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_descartar_libera_sin_guardar_y_queda_en_bitacora(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws = await con_turno(doc, escenario["editor"])
+        await ws.send_json_to({"tipo": "editar", "contenido": "no me sirve"})
+        await ws.send_json_to({"tipo": "liberar_turno", "descartar": True})
+        libre = await recibir_tipo(ws, "turno")
+        borrador = await estado_vivo.leer_borrador(doc.id)
+        await ws.disconnect()
+        return libre, borrador
+
+    libre, borrador = async_to_sync(probar)()
+
+    assert quien(libre) is None and borrador is None
+    assert versiones_de(doc) == []
+    assert len(eventos(doc, "DESCARTAR_BORRADOR")) == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_desconexion_con_cambios_pendientes_guarda_la_version(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_editor = await con_turno(doc, escenario["editor"])
+        ws_lector, _ = await abrir(doc.id, escenario["lector"])
+        await ws_editor.send_json_to({"tipo": "editar", "contenido": "cerré la pestaña"})
+        await recibir_tipo(ws_lector, "cambio")
+        await ws_editor.disconnect()
+        aviso = await recibir_tipo(ws_lector, "version_guardada")
+        await ws_lector.disconnect()
+        return aviso
+
+    assert async_to_sync(probar)()["numero_version"] == 1
+    assert [v.contenido for v in versiones_de(doc)] == ["cerré la pestaña"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_turno_vencido_con_la_pestana_abierta_guarda_el_borrador(escenario, settings):
+    settings.TURNO_TTL = 1
+    doc, editor = escenario["doc"], escenario["editor"]
+
+    async def probar():
+        ws_editor = await con_turno(doc, editor)
+        ws_lector, _ = await abrir(doc.id, escenario["lector"])
+        await ws_editor.send_json_to({"tipo": "editar", "contenido": "me fui a tomar café"})
+        await recibir_tipo(ws_lector, "cambio")
+        await asyncio.sleep(1.3)
+        # Ningún temporizador del cliente: el editor solo sigue latiendo.
+        await ws_editor.send_json_to({"tipo": "latido"})
+        aviso = await recibir_tipo(ws_lector, "version_guardada")
+        await ws_editor.disconnect()
+        await ws_lector.disconnect()
+        return aviso
+
+    aviso = async_to_sync(probar)()
+
+    assert aviso == {"tipo": "version_guardada", "numero_version": 1, "autor": "editor"}
+    assert versiones_de(doc)[0].autor == editor
+
+
+@pytest.mark.django_db(transaction=True)
+def test_borrador_huerfano_se_guarda_al_conectarse_alguien(escenario, settings):
+    # Simula una caída del proceso: queda un turno (que vence) y su borrador,
+    # sin ninguna conexión viva que se entere.
+    settings.TURNO_TTL = 1
+    doc, editor = escenario["doc"], escenario["editor"]
+    datos = {"usuario_id": str(editor.pk), "nombre": "editor", "canal": "canal-caido", "version_base": 0}
+
+    async def probar():
+        await estado_vivo.tomar_turno(doc.id, datos, ttl=1)
+        await estado_vivo.aplicar_edicion(doc.id, "canal-caido", "texto rescatado", ttl=1)
+        await asyncio.sleep(1.3)
+        ws, _ = await abrir(doc.id, escenario["gestor"])
+        await ws.disconnect()
+
+    async_to_sync(probar)()
+
+    versiones = versiones_de(doc)
+    assert [v.contenido for v in versiones] == ["texto rescatado"]
+    assert versiones[0].autor == editor
+
+
+@pytest.mark.django_db(transaction=True)
+def test_conflicto_automatico_conserva_el_texto_en_la_bitacora(escenario):
+    doc, editor, gestor = escenario["doc"], escenario["editor"], escenario["gestor"]
+    guardar_por_rest = database_sync_to_async(lambda: guardar_version(doc, gestor, "cambio de otro"))
+
+    async def probar():
+        ws_editor = await con_turno(doc, editor)
+        ws_lector, _ = await abrir(doc.id, escenario["lector"])
+        await ws_editor.send_json_to({"tipo": "editar", "contenido": "mi texto"})
+        await recibir_tipo(ws_lector, "cambio")
+        await guardar_por_rest()
+        await ws_editor.disconnect()       # guardado automático -> conflicto
+        aviso = await recibir_tipo(ws_lector, "borrador_en_conflicto")
+        await ws_lector.disconnect()
+        return aviso
+
+    aviso = async_to_sync(probar)()
+
+    assert aviso["autor"] == "editor"
+    assert [v.contenido for v in versiones_de(doc)] == ["cambio de otro"]  # no tapó la otra
+    conservado = eventos(doc, "BORRADOR_EN_CONFLICTO")
+    assert len(conservado) == 1
+    assert conservado[0].detalles["contenido"] == "mi texto"
+    assert conservado[0].usuario == editor
+
+
+@pytest.mark.django_db(transaction=True)
+def test_sin_permiso_al_guardar_automatico_se_descarta(escenario):
+    doc, editor = escenario["doc"], escenario["editor"]
+    quitar_permiso = database_sync_to_async(
+        lambda: PermisoDocumento.objects.filter(usuario=editor).delete()
+    )
+
+    async def probar():
+        ws = await con_turno(doc, editor)
+        await ws.send_json_to({"tipo": "editar", "contenido": "ya no debería guardarse"})
+        await asyncio.sleep(0.2)
+        await quitar_permiso()
+        await ws.disconnect()
+
+    async_to_sync(probar)()
+
+    assert versiones_de(doc) == []
+    descartes = eventos(doc, "BORRADOR_DESCARTADO")
+    assert len(descartes) == 1
+    assert "contenido" not in descartes[0].detalles
