@@ -34,15 +34,16 @@ class Command(BaseCommand):
         for usuario in [gestor, lector, editor]:
             MiembroEspacio.objects.get_or_create(espacio=espacio, usuario=usuario)
 
-        documento, creado = Documento.objects.get_or_create(
+        documento = Documento.objects.filter(
             espacio=espacio,
             titulo="Manual de bienvenida",
-            defaults={"creador": gestor},
-        )
-        if creado:
+            eliminado_en__isnull=True,
+        ).first()
+        if documento is None:
+            documento = Documento.objects.create(espacio=espacio, titulo="Manual de bienvenida", creador=gestor)
             guardar_version(documento, gestor, "Bienvenido a DocSpace.")
             guardar_version(documento, gestor, "Bienvenido a DocSpace.\nEste documento tiene historial de versiones.")
-
+            
         PermisoDocumento.objects.get_or_create(documento=documento, usuario=lector, defaults={"nivel": "LECTURA"})
         PermisoDocumento.objects.get_or_create(documento=documento, usuario=editor, defaults={"nivel": "EDICION"})
 
