@@ -53,8 +53,8 @@ export default function PanelGestor({ yo }: { yo: Usuario }) {
             placeholder="Ej. Área de ventas"
             value={nombreEspacio}
             onChange={(e) => setNombreEspacio(e.currentTarget.value)}
-            style={{ flex: 1 }}
-          />
+            style={{ flex: 1, minWidth: 200 }}
+                      />
           <Button onClick={() => crearEspacio.mutate()} loading={crearEspacio.isPending} disabled={!nombreEspacio}>
             Crear espacio
           </Button>
@@ -68,14 +68,14 @@ export default function PanelGestor({ yo }: { yo: Usuario }) {
             data={misEspacios.map((espacio) => ({ value: espacio.id, label: espacio.nombre }))}
             value={espacioId}
             onChange={setEspacioId}
+            style={{ flex: 1, minWidth: 200 }}
           />
           <TextInput
             label="Nuevo documento"
             placeholder="Título del documento"
             value={titulo}
             onChange={(e) => setTitulo(e.currentTarget.value)}
-            style={{ flex: 1 }}
-          />
+            style={{ flex: 2, minWidth: 200 }}          />
           <Button
             onClick={() => crearDocumento.mutate()}
             loading={crearDocumento.isPending}

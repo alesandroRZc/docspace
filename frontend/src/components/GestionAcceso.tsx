@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Divider, Group, PasswordInput, Select, Stack, TextInput, Title } from "@mantine/core";
+import { Alert, Button, Card, Divider, Group, PasswordInput, Select, SimpleGrid, Stack, TextInput, Title } from "@mantine/core";
 import { api } from "../api/cliente";
 import type { Documento, Espacio, Nivel, Usuario } from "../api/tipos";
 
@@ -43,7 +43,7 @@ export default function GestionAcceso({ documento }: { documento: Documento }) {
     onSuccess: () => setEmailPermiso(""),
   });
 
-  return (
+   return (
     <Card withBorder>
       <Stack>
         <Title order={3}>Gestión de acceso</Title>
@@ -56,7 +56,7 @@ export default function GestionAcceso({ documento }: { documento: Documento }) {
                 label="Correo del usuario"
                 value={emailMiembro}
                 onChange={(e) => setEmailMiembro(e.currentTarget.value)}
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: 200 }}
               />
               <Button onClick={() => agregarMiembro.mutate()} loading={agregarMiembro.isPending} disabled={!emailMiembro}>
                 Agregar
@@ -68,11 +68,9 @@ export default function GestionAcceso({ documento }: { documento: Documento }) {
             <Divider />
 
             <Title order={5}>Crear colaborador</Title>
-            <Group grow>
+            <SimpleGrid cols={{ base: 1, sm: 2 }}>
               <TextInput label="Nombre" value={nuevo.nombre} onChange={(e) => setNuevo({ ...nuevo, nombre: e.currentTarget.value })} />
               <TextInput label="Usuario" value={nuevo.username} onChange={(e) => setNuevo({ ...nuevo, username: e.currentTarget.value })} />
-            </Group>
-            <Group grow>
               <TextInput label="Correo" value={nuevo.email} onChange={(e) => setNuevo({ ...nuevo, email: e.currentTarget.value })} />
               <PasswordInput
                 label="Contraseña"
@@ -80,7 +78,7 @@ export default function GestionAcceso({ documento }: { documento: Documento }) {
                 value={nuevo.password}
                 onChange={(e) => setNuevo({ ...nuevo, password: e.currentTarget.value })}
               />
-            </Group>
+            </SimpleGrid>
             <Group justify="flex-end">
               <Button onClick={() => crearColaborador.mutate()} loading={crearColaborador.isPending}>
                 Crear colaborador
@@ -99,7 +97,7 @@ export default function GestionAcceso({ documento }: { documento: Documento }) {
             label="Correo del miembro"
             value={emailPermiso}
             onChange={(e) => setEmailPermiso(e.currentTarget.value)}
-            style={{ flex: 1 }}
+            style={{ flex: 2, minWidth: 200 }}
           />
           <Select
             label="Nivel"
@@ -110,6 +108,7 @@ export default function GestionAcceso({ documento }: { documento: Documento }) {
               { value: "EDICION", label: "Edición" },
               { value: "ADMINISTRACION", label: "Administración" },
             ]}
+            style={{ flex: 1, minWidth: 140 }}
           />
           <Button onClick={() => asignarPermiso.mutate()} loading={asignarPermiso.isPending} disabled={!emailPermiso}>
             Asignar
