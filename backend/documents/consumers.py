@@ -7,27 +7,33 @@ Códigos de cierre:
   4401 -> sin token, token inválido o vencido.
   4404 -> el documento no existe, está eliminado, es de otro espacio o ya no
           tienes acceso (mismo criterio de aislamiento que el 404 de REST).
+
+Mensajes del cliente: latido, pedir_turno, liberar_turno, editar.
+Mensajes del servidor: conectado, presencia, turno, turno_ocupado, error.
 """
 
 import time
 
-from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 from . import estado_vivo
 from .middleware_jwt import SUBPROTOCOLO
-from .services import documentos_visibles, obtener_nivel, presentes_en_documento, ttl_presencia
+from .models import PermisoDocumento
+from .services import (
+    PermisoInsuficiente,
+    detectar_turno_vencido,
+    liberar_turno,
+    nivel_alcanza,
+    nivel_en_documento,
+    pedir_turno,
+    presentes_en_documento,
+    renovar_turno,
+    ttl_presencia,
+    turno_vigente,
+)
 
 CIERRE_NO_AUTENTICADO = 4401
 CIERRE_NO_ENCONTRADO = 4404
-
-
-@database_sync_to_async
-def nivel_en_documento(usuario, documento_id):
-    documento = documentos_visibles(usuario).select_related("espacio").filter(pk=documento_id).first()
-    if documento is None:
-        return None
-    return obtener_nivel(usuario, documento)
 
 
 class DocumentoConsumer(AsyncJsonWebsocketConsumer):
@@ -52,6 +58,7 @@ class DocumentoConsumer(AsyncJsonWebsocketConsumer):
         await self.channel_layer.group_add(self.grupo, self.channel_name)
         await self.accept(subprotocol=SUBPROTOCOLO)
         await self.send_json({"tipo": "conectado", "nivel": nivel})
+        await self.send_json({"tipo": "turno", "turno": await turno_vigente(self.documento_id)})
 
         await self._marcar_presente()
         await self._difundir_presencia()
@@ -62,6 +69,8 @@ class DocumentoConsumer(AsyncJsonWebsocketConsumer):
         await self.channel_layer.group_discard(self.grupo, self.channel_name)
         await estado_vivo.quitar_presencia(self.documento_id, self.scope["user"].pk, self.channel_name)
         await self._difundir_presencia()
+        if await liberar_turno(self.documento_id, self.channel_name):
+            await self._difundir_turno(None)
 
     async def receive_json(self, contenido, **kwargs):
         # En cada mensaje: token vigente y permiso vigente.
@@ -73,16 +82,26 @@ class DocumentoConsumer(AsyncJsonWebsocketConsumer):
         if nivel is None:
             return await self.close(code=CIERRE_NO_ENCONTRADO)
 
+        # Cualquier mensaje entrante sirve para notar que el turno venció por
+        # inactividad, sin depender del temporizador del cliente.
+        if await detectar_turno_vencido(self.documento_id) is not None:
+            await self._difundir_turno(None)
+
         tipo = contenido.get("tipo") if isinstance(contenido, dict) else None
-        if tipo == "latido":
-            return await self._latido()
-        # Los mensajes de turno y edición llegan en los pasos 5 y 6.
-        await self.send_json({"tipo": "error", "codigo": 400, "detalle": f"Tipo de mensaje desconocido: {tipo}"})
+        manejador = {
+            "latido": self._latido,
+            "pedir_turno": self._pedir_turno,
+            "liberar_turno": self._liberar_turno,
+            "editar": self._editar,
+        }.get(tipo)
+        if manejador is None:
+            return await self._error(400, "tipo_desconocido", f"Tipo de mensaje desconocido: {tipo}")
+        await manejador(nivel, contenido)
 
     # --- Presencia -----------------------------------------------------------
 
-    async def _latido(self):
-        # El latido mantiene SOLO la presencia (no renueva el turno de edición).
+    async def _latido(self, nivel, contenido):
+        # El latido mantiene SOLO la presencia: nunca renueva el turno.
         await self._marcar_presente()
         usuarios, purgadas = await presentes_en_documento(self.documento_id)
         if purgadas:
@@ -103,6 +122,48 @@ class DocumentoConsumer(AsyncJsonWebsocketConsumer):
 
     async def presencia(self, evento):
         await self.send_json({"tipo": "presencia", "usuarios": evento["usuarios"]})
+
+    # --- Turno de edición ------------------------------------------------------
+
+    async def _pedir_turno(self, nivel, contenido):
+        try:
+            estado, turno = await pedir_turno(self.scope["user"], self.documento_id, self.channel_name, nivel)
+        except PermisoInsuficiente:
+            return await self._error(403, "sin_permiso", "Necesitas permiso de edición para editar.")
+
+        if estado == "concedido":
+            await self._difundir_turno(turno)
+        elif estado == "ocupado":
+            await self.send_json({"tipo": "turno_ocupado", "turno": turno})
+        else:  # ya_tuyo
+            await self.send_json({"tipo": "turno", "turno": turno})
+
+    async def _liberar_turno(self, nivel, contenido):
+        if not await liberar_turno(self.documento_id, self.channel_name):
+            return await self._error(403, "sin_turno", "No tienes el turno de edición.")
+        await self._difundir_turno(None)
+
+    async def _editar(self, nivel, contenido):
+        if not nivel_alcanza(nivel, PermisoDocumento.Nivel.EDICION):
+            return await self._error(403, "sin_permiso", "Necesitas permiso de edición para editar.")
+
+        estado = await renovar_turno(self.documento_id, self.channel_name)
+        if estado == "vencido":
+            return await self._error(409, "turno_vencido", "Tu turno de edición venció por inactividad.")
+        if estado == "ajeno":
+            return await self._error(409, "sin_turno", "No tienes el turno de edición.")
+        # Paso 6: retransmitir el contenido a los demás y actualizar el borrador.
+
+    async def _difundir_turno(self, turno):
+        await self.channel_layer.group_send(self.grupo, {"type": "turno", "turno": turno})
+
+    async def turno(self, evento):
+        await self.send_json({"tipo": "turno", "turno": evento["turno"]})
+
+    # --- Utilidades -------------------------------------------------------------
+
+    async def _error(self, codigo, motivo, detalle):
+        await self.send_json({"tipo": "error", "codigo": codigo, "motivo": motivo, "detalle": detalle})
 
     async def _rechazar(self, codigo):
         protocolos = self.scope.get("subprotocols") or []

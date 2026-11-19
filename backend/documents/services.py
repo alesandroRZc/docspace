@@ -36,11 +36,23 @@ def obtener_nivel(usuario, documento):
 
   
         
-def tiene_nivel(usuario, documento, nivel_minimo):
-    nivel = obtener_nivel(usuario, documento)
+def nivel_alcanza(nivel, nivel_minimo):
     if nivel is None:
         return False
     return JERARQUIA[nivel] >= JERARQUIA[nivel_minimo]
+
+
+def tiene_nivel(usuario, documento, nivel_minimo):
+    return nivel_alcanza(obtener_nivel(usuario, documento), nivel_minimo)
+
+
+@database_sync_to_async
+def nivel_en_documento(usuario, documento_id):
+    """Nivel del usuario sobre el documento, o None si no lo ve (para el canal en tiempo real)."""
+    documento = documentos_visibles(usuario).select_related("espacio").filter(pk=documento_id).first()
+    if documento is None:
+        return None
+    return obtener_nivel(usuario, documento)
 
 
 
@@ -121,6 +133,74 @@ async def presentes_en_documento(documento_id):
     """
     ids, purgadas = await estado_vivo.usuarios_presentes(documento_id, ttl_presencia())
     return await _datos_de_usuarios(ids), purgadas
+
+
+# --- Turno de edición (un editor a la vez) -----------------------------------
+
+class PermisoInsuficiente(Exception):
+    pass
+
+
+def ttl_turno():
+    return getattr(settings, "TURNO_TTL", 30)
+
+
+def turno_publico(turno):
+    """Lo que ven los demás: quién edita (sin el canal interno)."""
+    if turno is None:
+        return None
+    return {"usuario_id": turno["usuario_id"], "nombre": turno["nombre"]}
+
+
+@database_sync_to_async
+def _numero_version_actual(documento_id):
+    ultima = VersionDocumento.objects.filter(documento_id=documento_id).order_by("-numero_version").first()
+    return ultima.numero_version if ultima is not None else 0
+
+
+async def pedir_turno(usuario, documento_id, canal, nivel):
+    """
+    Devuelve (estado, turno_publico) con estado:
+      "concedido" -> el turno es ahora de este canal
+      "ya_tuyo"   -> este canal ya lo tenía (NO renueva el TTL)
+      "ocupado"   -> lo tiene otro; turno_publico dice quién
+    Requiere EDICION.
+    """
+    if not nivel_alcanza(nivel, PermisoDocumento.Nivel.EDICION):
+        raise PermisoInsuficiente()
+
+    datos = {
+        "usuario_id": str(usuario.pk),
+        "nombre": usuario.nombre,
+        "canal": canal,
+        "version_base": await _numero_version_actual(documento_id),
+    }
+    vigente = await estado_vivo.tomar_turno(documento_id, datos, ttl_turno())
+
+    if vigente is None or vigente["canal"] != canal:
+        return "ocupado", turno_publico(vigente)
+    if vigente == datos:
+        return "concedido", turno_publico(vigente)
+    return "ya_tuyo", turno_publico(vigente)
+
+
+async def renovar_turno(documento_id, canal):
+    """Solo se llama ante un "editar" del dueño. El latido nunca renueva el turno."""
+    return await estado_vivo.renovar_turno(documento_id, canal, ttl_turno())
+
+
+async def liberar_turno(documento_id, canal):
+    """True si el turno era de este canal y se liberó."""
+    return await estado_vivo.liberar_turno(documento_id, canal)
+
+
+async def detectar_turno_vencido(documento_id):
+    """Si el turno venció sin liberarse, devuelve quién lo tenía (una sola vez)."""
+    return await estado_vivo.detectar_turno_vencido(documento_id)
+
+
+async def turno_vigente(documento_id):
+    return turno_publico(await estado_vivo.turno_actual(documento_id))
 
 
 def comparar_versiones(version_a, version_b):

@@ -1,3 +1,4 @@
+import asyncio
 import time
 from datetime import timedelta
 
@@ -72,12 +73,15 @@ def escenario():
     MiembroEspacio.objects.create(espacio=espacio, usuario=lector)
     doc = Documento.objects.create(espacio=espacio, creador=gestor, titulo="Doc A")
     PermisoDocumento.objects.create(documento=doc, usuario=lector, nivel="LECTURA")
+    editor = crear_usuario("editor@x.com")
+    MiembroEspacio.objects.create(espacio=espacio, usuario=editor)
+    PermisoDocumento.objects.create(documento=doc, usuario=editor, nivel="EDICION")
 
     gestor_b = crear_usuario("gestorb@x.com", "GESTOR")
     espacio_b = EspacioTrabajo.objects.create(gestor=gestor_b, nombre="Espacio B")
     doc_b = Documento.objects.create(espacio=espacio_b, creador=gestor_b, titulo="Doc B")
 
-    return {"gestor": gestor, "lector": lector, "doc": doc, "doc_b": doc_b}
+    return {"gestor": gestor, "lector": lector, "editor": editor, "doc": doc, "doc_b": doc_b}
 
 
 async def recibir_tipo(ws, tipo):
@@ -357,3 +361,219 @@ def test_latido_con_permiso_revocado_cierra_4404(escenario):
         return salida
 
     assert_cierre(async_to_sync(probar)(), 4404)
+
+
+# --- Turno de edición ---------------------------------------------------------
+
+def quien(turno_msg):
+    return turno_msg["turno"]["nombre"] if turno_msg["turno"] else None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_editor_obtiene_el_turno_y_todos_lo_ven(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_editor, _ = await abrir(doc.id, escenario["editor"])
+        ws_lector, _ = await abrir(doc.id, escenario["lector"])
+        await ws_editor.send_json_to({"tipo": "pedir_turno"})
+        visto_por_editor = await recibir_tipo(ws_editor, "turno")
+        visto_por_lector = await recibir_tipo(ws_lector, "turno")
+        await ws_editor.disconnect()
+        await ws_lector.disconnect()
+        return visto_por_editor, visto_por_lector
+
+    visto_por_editor, visto_por_lector = async_to_sync(probar)()
+
+    assert quien(visto_por_editor) == "editor"
+    assert quien(visto_por_lector) == "editor"
+    assert "canal" not in visto_por_lector["turno"]  # no se filtra el canal interno
+
+
+@pytest.mark.django_db(transaction=True)
+def test_quien_se_conecta_ve_el_turno_vigente(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_editor, _ = await abrir(doc.id, escenario["editor"])
+        await ws_editor.send_json_to({"tipo": "pedir_turno"})
+        await recibir_tipo(ws_editor, "turno")
+        ws_nuevo = comunicador(doc.id, token_de(escenario["gestor"]))
+        await ws_nuevo.connect()
+        inicial = await recibir_tipo(ws_nuevo, "turno")
+        await ws_nuevo.disconnect()
+        await ws_editor.disconnect()
+        return inicial
+
+    assert quien(async_to_sync(probar)()) == "editor"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_segundo_editor_recibe_ocupado_con_el_nombre(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_a, _ = await abrir(doc.id, escenario["editor"])
+        ws_b, _ = await abrir(doc.id, escenario["gestor"])
+        await ws_a.send_json_to({"tipo": "pedir_turno"})
+        await recibir_tipo(ws_b, "turno")
+        await ws_b.send_json_to({"tipo": "pedir_turno"})
+        respuesta = await recibir_tipo(ws_b, "turno_ocupado")
+        await ws_a.disconnect()
+        await ws_b.disconnect()
+        return respuesta
+
+    assert quien(async_to_sync(probar)()) == "editor"
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("mensaje", ["pedir_turno", "editar"])
+def test_lector_no_puede_pedir_turno_ni_editar(escenario, mensaje):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws, _ = await abrir(doc.id, escenario["lector"])
+        await ws.send_json_to({"tipo": mensaje})
+        error = await recibir_tipo(ws, "error")
+        turno = await estado_vivo.turno_actual(doc.id)
+        await ws.disconnect()
+        return error, turno
+
+    error, turno = async_to_sync(probar)()
+
+    assert error["codigo"] == 403
+    assert turno is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_quien_no_es_dueno_no_puede_liberar(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_a, _ = await abrir(doc.id, escenario["editor"])
+        ws_b, _ = await abrir(doc.id, escenario["gestor"])
+        await ws_a.send_json_to({"tipo": "pedir_turno"})
+        await recibir_tipo(ws_b, "turno")
+        await ws_b.send_json_to({"tipo": "liberar_turno"})
+        error = await recibir_tipo(ws_b, "error")
+        turno = await estado_vivo.turno_actual(doc.id)
+        await ws_a.disconnect()
+        await ws_b.disconnect()
+        return error, turno
+
+    error, turno = async_to_sync(probar)()
+
+    assert error["codigo"] == 403
+    assert turno["nombre"] == "editor"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dueno_libera_y_todos_ven_turno_libre(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_a, _ = await abrir(doc.id, escenario["editor"])
+        ws_b, _ = await abrir(doc.id, escenario["gestor"])
+        await ws_a.send_json_to({"tipo": "pedir_turno"})
+        await recibir_tipo(ws_b, "turno")
+        await ws_a.send_json_to({"tipo": "liberar_turno"})
+        aviso = await recibir_tipo(ws_b, "turno")
+        await ws_a.disconnect()
+        await ws_b.disconnect()
+        return aviso
+
+    assert quien(async_to_sync(probar)()) is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_al_desconectarse_el_dueno_el_turno_queda_libre(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_a, _ = await abrir(doc.id, escenario["editor"])
+        ws_b, _ = await abrir(doc.id, escenario["gestor"])
+        await ws_a.send_json_to({"tipo": "pedir_turno"})
+        await recibir_tipo(ws_b, "turno")
+        await ws_a.disconnect()
+        aviso = await recibir_tipo(ws_b, "turno")
+        await ws_b.disconnect()
+        return aviso
+
+    assert quien(async_to_sync(probar)()) is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_un_latido_sin_ediciones_no_renueva_el_turno(escenario, settings):
+    # TTL de 2 s. El dueño late al segundo 1: si el latido renovara, el turno
+    # duraría hasta el segundo 3 y a los 2.3 s seguiría ocupado.
+    settings.TURNO_TTL = 2
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_a, _ = await abrir(doc.id, escenario["editor"])
+        ws_b, _ = await abrir(doc.id, escenario["gestor"])
+        await ws_a.send_json_to({"tipo": "pedir_turno"})
+        await recibir_tipo(ws_a, "turno")  # su propio turno concedido
+        await recibir_tipo(ws_b, "turno")
+
+        await asyncio.sleep(1.0)
+        await ws_a.send_json_to({"tipo": "latido"})
+        await asyncio.sleep(1.3)
+
+        await ws_b.send_json_to({"tipo": "pedir_turno"})
+        libre_visto_por_a = await recibir_tipo(ws_a, "turno")
+        nuevo_visto_por_a = await recibir_tipo(ws_a, "turno")
+        await ws_a.disconnect()
+        await ws_b.disconnect()
+        return libre_visto_por_a, nuevo_visto_por_a
+
+    libre, nuevo = async_to_sync(probar)()
+
+    assert quien(libre) is None        # el servidor anunció el vencimiento
+    assert quien(nuevo) == "gestor"    # y otro editor pudo tomarlo
+
+
+@pytest.mark.django_db(transaction=True)
+def test_editar_del_dueno_si_renueva_el_turno(escenario, settings):
+    # Mismo reloj que la prueba anterior, pero con un "editar" en vez de latido.
+    settings.TURNO_TTL = 2
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_a, _ = await abrir(doc.id, escenario["editor"])
+        ws_b, _ = await abrir(doc.id, escenario["gestor"])
+        await ws_a.send_json_to({"tipo": "pedir_turno"})
+        await recibir_tipo(ws_b, "turno")
+
+        await asyncio.sleep(1.0)
+        await ws_a.send_json_to({"tipo": "editar"})
+        await asyncio.sleep(1.3)
+
+        await ws_b.send_json_to({"tipo": "pedir_turno"})
+        respuesta = await recibir_tipo(ws_b, "turno_ocupado")
+        await ws_a.disconnect()
+        await ws_b.disconnect()
+        return respuesta
+
+    assert quien(async_to_sync(probar)()) == "editor"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_editar_con_el_turno_vencido_responde_turno_vencido(escenario, settings):
+    settings.TURNO_TTL = 1
+    doc = escenario["doc"]
+
+    async def probar():
+        ws, _ = await abrir(doc.id, escenario["editor"])
+        await ws.send_json_to({"tipo": "pedir_turno"})
+        await recibir_tipo(ws, "turno")
+        await asyncio.sleep(1.3)
+        await ws.send_json_to({"tipo": "editar"})
+        error = await recibir_tipo(ws, "error")
+        await ws.disconnect()
+        return error
+
+    error = async_to_sync(probar)()
+
+    assert error["codigo"] == 409
+    assert error["motivo"] == "turno_vencido"

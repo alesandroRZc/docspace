@@ -10,8 +10,18 @@ Presencia: sorted set "doc:{id}:presencia"
   puntuación = timestamp del último latido
 Las entradas más viejas que el TTL se purgan al leer, así una pestaña cerrada
 sin aviso desaparece sola.
+
+Turno de edición: string "doc:{id}:turno" con TTL
+  valor = JSON {usuario_id, nombre, canal, version_base}
+  Se toma con SET NX EX. Solo se renueva con renovar_turno (que el canal llama
+  únicamente ante un "editar"); si nadie edita, Redis lo expira solo.
+Marcador "doc:{id}:turno:anunciado": recuerda que hubo un turno anunciado,
+  para detectar que venció (Redis borra la clave del turno sin avisar).
+Todas las operaciones del turno son scripts Lua: atómicas aunque haya varios
+procesos atendiendo el mismo documento.
 """
 
+import json
 import time
 from contextlib import asynccontextmanager
 
@@ -60,3 +70,78 @@ async def usuarios_presentes(documento_id, ttl, ahora=None):
         purgadas = await r.zremrangebyscore(clave, "-inf", ahora - ttl)
         miembros = await r.zrange(clave, 0, -1)
     return {miembro.split("|", 1)[0] for miembro in miembros}, purgadas
+
+
+# --- Turno de edición ---------------------------------------------------------
+
+ANUNCIO_TTL = 24 * 60 * 60  # el marcador solo debe sobrevivir al turno
+
+
+def _claves_turno(documento_id):
+    return [f"doc:{documento_id}:turno", f"doc:{documento_id}:turno:anunciado"]
+
+
+# Toma el turno si está libre. Devuelve el turno vigente (el propio o el ajeno).
+_TOMAR = """
+redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2])
+local actual = redis.call('GET', KEYS[1])
+if actual == ARGV[1] then
+  redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3])
+end
+return actual
+"""
+
+# Renueva el TTL solo si el turno es de este canal.
+_RENOVAR = """
+local actual = redis.call('GET', KEYS[1])
+if not actual then return 'vencido' end
+if cjson.decode(actual)['canal'] ~= ARGV[1] then return 'ajeno' end
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return 'renovado'
+"""
+
+# Comparar y borrar: solo el canal dueño puede liberar.
+_LIBERAR = """
+local actual = redis.call('GET', KEYS[1])
+if not actual or cjson.decode(actual)['canal'] ~= ARGV[1] then return 0 end
+redis.call('DEL', KEYS[1], KEYS[2])
+return 1
+"""
+
+# Si el turno ya no existe pero estaba anunciado, venció: consumir el marcador
+# (una sola conexión lo recibe) y devolver quién lo tenía.
+_DETECTAR_VENCIDO = """
+if redis.call('EXISTS', KEYS[1]) == 1 then return false end
+return redis.call('GETDEL', KEYS[2])
+"""
+
+
+def _decodificar(valor):
+    return json.loads(valor) if valor else None
+
+
+async def tomar_turno(documento_id, datos, ttl):
+    async with _conexion() as r:
+        actual = await r.eval(_TOMAR, 2, *_claves_turno(documento_id), json.dumps(datos), ttl, ANUNCIO_TTL)
+    return _decodificar(actual)
+
+
+async def renovar_turno(documento_id, canal, ttl):
+    """Devuelve 'renovado', 'ajeno' (lo tiene otro) o 'vencido' (no hay turno)."""
+    async with _conexion() as r:
+        return await r.eval(_RENOVAR, 2, *_claves_turno(documento_id), canal, ttl)
+
+
+async def liberar_turno(documento_id, canal):
+    async with _conexion() as r:
+        return bool(await r.eval(_LIBERAR, 2, *_claves_turno(documento_id), canal))
+
+
+async def detectar_turno_vencido(documento_id):
+    async with _conexion() as r:
+        return _decodificar(await r.eval(_DETECTAR_VENCIDO, 2, *_claves_turno(documento_id)))
+
+
+async def turno_actual(documento_id):
+    async with _conexion() as r:
+        return _decodificar(await r.get(_claves_turno(documento_id)[0]))
