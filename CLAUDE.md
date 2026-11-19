@@ -32,11 +32,12 @@
 - Trabajar en pasos pequeños. Proponer un plan antes de cambios grandes.
 - No hacer commits por iniciativa propia: los hago yo después de revisar.
 - No agregar dependencias sin explicar antes por qué hacen falta.
-- Todo cambio de backend lleva su prueba. Los 10 tests existentes deben seguir pasando.
+- Todo cambio de backend lleva su prueba. Todas las pruebas existentes deben seguir pasando.
+- No modificar archivos fuera del plan aprobado sin avisarme antes y explicar por qué.
+- Crear y modificar archivos siempre con la herramienta de edición, nunca con comandos de shell (`cat >>`, `echo >`, `sed`), para que cada cambio pase por mi revisión del diff.
 
 ## Decisiones de la Fase 2
 - Tiempo real con **Django Channels** (WebSockets) y **Redis** como channel layer (servicio nuevo en Compose).
 - El WebSocket se autentica con el JWT y los permisos se verifican al conectar y en cada mensaje.
 - Un usuario con LECTURA recibe cambios pero el servidor rechaza lo que intente emitir.
 - Conflictos: **turno de edición** (un editor a la vez, los demás ven quién edita) + **control optimista** por número de versión como red de seguridad. Nunca perder datos en silencio.
-- No modificar archivos fuera del plan aprobado sin avisarme antes y explicar por qué.
