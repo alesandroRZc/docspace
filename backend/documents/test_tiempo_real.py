@@ -1,3 +1,4 @@
+import time
 from datetime import timedelta
 
 import pytest
@@ -11,6 +12,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from config.asgi import application
+from documents import estado_vivo
 from documents.models import Documento, PermisoDocumento
 from workspaces.models import EspacioTrabajo, MiembroEspacio
 
@@ -76,6 +78,22 @@ def escenario():
     doc_b = Documento.objects.create(espacio=espacio_b, creador=gestor_b, titulo="Doc B")
 
     return {"gestor": gestor, "lector": lector, "doc": doc, "doc_b": doc_b}
+
+
+async def recibir_tipo(ws, tipo):
+    """Lee mensajes JSON hasta encontrar uno del tipo pedido."""
+    while True:
+        mensaje = await ws.receive_json_from()
+        if mensaje["tipo"] == tipo:
+            return mensaje
+
+
+async def esperar_cierre(ws):
+    """Descarta mensajes hasta recibir el cierre del servidor."""
+    while True:
+        salida = await ws.receive_output()
+        if salida["type"] == "websocket.close":
+            return salida
 
 
 def assert_cierre(salida, codigo):
@@ -207,10 +225,10 @@ def test_permiso_revocado_cierra_en_el_siguiente_mensaje(escenario):
     async def probar():
         ws = comunicador(escenario["doc"].id, token)
         await ws.connect()
-        await ws.receive_json_from()  # "conectado"
+        await recibir_tipo(ws, "conectado")
         await quitar_permiso()
         await ws.send_json_to({"tipo": "cualquiera"})
-        salida = await ws.receive_output()
+        salida = await esperar_cierre(ws)
         await ws.disconnect()
         return salida
 
@@ -224,13 +242,118 @@ def test_mensaje_desconocido_responde_error_sin_cerrar(escenario):
     async def probar():
         ws = comunicador(escenario["doc"].id, token)
         await ws.connect()
-        await ws.receive_json_from()
+        await recibir_tipo(ws, "conectado")
         await ws.send_json_to({"tipo": "inventado"})
-        respuesta = await ws.receive_json_from()
+        respuesta = await recibir_tipo(ws, "error")
         await ws.disconnect()
         return respuesta
 
     respuesta = async_to_sync(probar)()
 
-    assert respuesta["tipo"] == "error"
     assert respuesta["codigo"] == 400
+
+
+# --- Presencia --------------------------------------------------------------
+
+async def abrir(documento_id, usuario):
+    """Conecta y consume el 'conectado' y la primera 'presencia'."""
+    ws = comunicador(documento_id, token_de(usuario))
+    conectado, _ = await ws.connect()
+    assert conectado
+    await recibir_tipo(ws, "conectado")
+    primera = await recibir_tipo(ws, "presencia")
+    return ws, primera
+
+
+def nombres(mensaje):
+    return [u["nombre"] for u in mensaje["usuarios"]]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dos_conexiones_se_ven_entre_si(escenario):
+    doc, gestor, lector = escenario["doc"], escenario["gestor"], escenario["lector"]
+
+    async def probar():
+        ws_a, primera_a = await abrir(doc.id, gestor)
+        ws_b, primera_b = await abrir(doc.id, lector)
+        aviso_a = await recibir_tipo(ws_a, "presencia")
+        await ws_a.disconnect()
+        await ws_b.disconnect()
+        return primera_a, primera_b, aviso_a
+
+    primera_a, primera_b, aviso_a = async_to_sync(probar)()
+
+    assert nombres(primera_a) == ["gestor"]
+    assert nombres(primera_b) == ["gestor", "lector"]
+    assert nombres(aviso_a) == ["gestor", "lector"]
+    assert aviso_a["usuarios"][0] == {"id": str(gestor.id), "nombre": "gestor"}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_al_desconectar_desaparece_de_la_presencia(escenario):
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_a, _ = await abrir(doc.id, escenario["gestor"])
+        ws_b, _ = await abrir(doc.id, escenario["lector"])
+        await recibir_tipo(ws_a, "presencia")  # entra B
+        await ws_b.disconnect()
+        aviso = await recibir_tipo(ws_a, "presencia")  # sale B
+        await ws_a.disconnect()
+        return aviso
+
+    assert nombres(async_to_sync(probar)()) == ["gestor"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_latido_purga_entrada_vencida_y_avisa(escenario):
+    doc, lector = escenario["doc"], escenario["lector"]
+
+    async def probar():
+        ws, _ = await abrir(doc.id, escenario["gestor"])
+        # Una pestaña del lector que dejó de latir hace 100 s (cerrada sin aviso).
+        await estado_vivo.registrar_presencia(doc.id, lector.pk, "canal-muerto", ttl=30, ahora=time.time() - 100)
+        await ws.send_json_to({"tipo": "latido"})
+        aviso = await recibir_tipo(ws, "presencia")
+        await ws.disconnect()
+        return aviso
+
+    assert nombres(async_to_sync(probar)()) == ["gestor"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dos_pestanas_del_mismo_usuario_cuentan_una_vez(escenario):
+    doc, gestor = escenario["doc"], escenario["gestor"]
+
+    async def probar():
+        pestana_1, _ = await abrir(doc.id, gestor)
+        pestana_2, con_dos = await abrir(doc.id, gestor)
+        await recibir_tipo(pestana_1, "presencia")  # entra la pestaña 2
+        await pestana_2.disconnect()
+        tras_cerrar_una = await recibir_tipo(pestana_1, "presencia")  # sale la pestaña 2
+        await pestana_1.disconnect()
+        return con_dos, tras_cerrar_una
+
+    con_dos, tras_cerrar_una = async_to_sync(probar)()
+
+    assert nombres(con_dos) == ["gestor"]
+    # Cerrar una pestaña no lo saca: la otra sigue abierta.
+    assert nombres(tras_cerrar_una) == ["gestor"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_latido_con_permiso_revocado_cierra_4404(escenario):
+    doc, lector = escenario["doc"], escenario["lector"]
+    quitar_permiso = database_sync_to_async(
+        lambda: PermisoDocumento.objects.filter(usuario=lector).delete()
+    )
+
+    async def probar():
+        ws, _ = await abrir(doc.id, lector)
+        await quitar_permiso()
+        await ws.send_json_to({"tipo": "latido"})
+        salida = await esperar_cierre(ws)
+        await ws.disconnect()
+        return salida
+
+    assert_cierre(async_to_sync(probar)(), 4404)

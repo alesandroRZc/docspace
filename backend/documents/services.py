@@ -1,9 +1,15 @@
+from channels.db import database_sync_to_async
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.db import transaction
 from .models import Documento, PermisoDocumento, VersionDocumento
+from . import estado_vivo
 from workspaces.models import MiembroEspacio
 from audit.services import registrar_evento
 import difflib
+
+Usuario = get_user_model()
 
 
 JERARQUIA = {
@@ -96,6 +102,26 @@ def guardar_version(documento, autor, contenido, restaurada_desde=None, version_
         {"version_base": version_base, "version_actual": actual},
     )
     raise ConflictoVersion(actual, ultimo.contenido if ultimo is not None else "")
+
+def ttl_presencia():
+    return getattr(settings, "PRESENCIA_TTL", 30)
+
+
+@database_sync_to_async
+def _datos_de_usuarios(ids):
+    usuarios = Usuario.objects.filter(pk__in=ids).order_by("nombre")
+    return [{"id": str(u.id), "nombre": u.nombre} for u in usuarios]
+
+
+async def presentes_en_documento(documento_id):
+    """
+    Lista de usuarios conectados al documento (una vez por usuario aunque
+    tenga varias pestañas), con su nombre. También indica si se purgaron
+    entradas vencidas, para que el canal avise a los demás.
+    """
+    ids, purgadas = await estado_vivo.usuarios_presentes(documento_id, ttl_presencia())
+    return await _datos_de_usuarios(ids), purgadas
+
 
 def comparar_versiones(version_a, version_b):
     lineas = difflib.unified_diff(

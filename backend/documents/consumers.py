@@ -14,8 +14,9 @@ import time
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
+from . import estado_vivo
 from .middleware_jwt import SUBPROTOCOLO
-from .services import documentos_visibles, obtener_nivel
+from .services import documentos_visibles, obtener_nivel, presentes_en_documento, ttl_presencia
 
 CIERRE_NO_AUTENTICADO = 4401
 CIERRE_NO_ENCONTRADO = 4404
@@ -52,9 +53,15 @@ class DocumentoConsumer(AsyncJsonWebsocketConsumer):
         await self.accept(subprotocol=SUBPROTOCOLO)
         await self.send_json({"tipo": "conectado", "nivel": nivel})
 
+        await self._marcar_presente()
+        await self._difundir_presencia()
+
     async def disconnect(self, code):
-        if self.grupo is not None:
-            await self.channel_layer.group_discard(self.grupo, self.channel_name)
+        if self.grupo is None:
+            return
+        await self.channel_layer.group_discard(self.grupo, self.channel_name)
+        await estado_vivo.quitar_presencia(self.documento_id, self.scope["user"].pk, self.channel_name)
+        await self._difundir_presencia()
 
     async def receive_json(self, contenido, **kwargs):
         # En cada mensaje: token vigente y permiso vigente.
@@ -67,8 +74,35 @@ class DocumentoConsumer(AsyncJsonWebsocketConsumer):
             return await self.close(code=CIERRE_NO_ENCONTRADO)
 
         tipo = contenido.get("tipo") if isinstance(contenido, dict) else None
-        # Los tipos de mensaje (latido, turno, edición) llegan en los pasos 4-6.
+        if tipo == "latido":
+            return await self._latido()
+        # Los mensajes de turno y edición llegan en los pasos 5 y 6.
         await self.send_json({"tipo": "error", "codigo": 400, "detalle": f"Tipo de mensaje desconocido: {tipo}"})
+
+    # --- Presencia -----------------------------------------------------------
+
+    async def _latido(self):
+        # El latido mantiene SOLO la presencia (no renueva el turno de edición).
+        await self._marcar_presente()
+        usuarios, purgadas = await presentes_en_documento(self.documento_id)
+        if purgadas:
+            # Alguien desapareció sin cerrar la conexión: avisar a todos.
+            await self._enviar_presencia_al_grupo(usuarios)
+
+    async def _marcar_presente(self):
+        await estado_vivo.registrar_presencia(
+            self.documento_id, self.scope["user"].pk, self.channel_name, ttl_presencia()
+        )
+
+    async def _difundir_presencia(self):
+        usuarios, _ = await presentes_en_documento(self.documento_id)
+        await self._enviar_presencia_al_grupo(usuarios)
+
+    async def _enviar_presencia_al_grupo(self, usuarios):
+        await self.channel_layer.group_send(self.grupo, {"type": "presencia", "usuarios": usuarios})
+
+    async def presencia(self, evento):
+        await self.send_json({"tipo": "presencia", "usuarios": evento["usuarios"]})
 
     async def _rechazar(self, codigo):
         protocolos = self.scope.get("subprotocols") or []
