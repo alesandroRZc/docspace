@@ -18,7 +18,8 @@ def obtener_nivel(usuario, documento):
     if documento.espacio.gestor == usuario:
         return PermisoDocumento.Nivel.ADMINISTRACION
     
-    #Remover Not: "pruebas que realmente fallan si se rompe la lógica"
+    # Aislamiento: aunque exista un PermisoDocumento, si el usuario ya no es
+    # miembro del espacio no tiene acceso. Ser miembro es requisito previo.
     if not MiembroEspacio.objects.filter(espacio=documento.espacio, usuario=usuario).exists():
         return None
      
