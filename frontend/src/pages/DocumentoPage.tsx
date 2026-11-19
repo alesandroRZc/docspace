@@ -29,7 +29,7 @@ export default function DocumentoPage() {
     mutationFn: () =>
       api(`/documents/${id}/save/`, {
         method: "POST",
-        body: JSON.stringify({ contenido }),
+        body: JSON.stringify({ contenido, version_base: documento?.version_actual }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documento", id] });

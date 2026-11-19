@@ -46,29 +46,56 @@ def documentos_visibles(usuario):
         | Q(permisos__usuario=usuario, espacio__miembros__usuario=usuario)
     ).distinct()
 
-def guardar_version(documento, autor, contenido, restaurada_desde=None):
+class ConflictoVersion(Exception):
+    """El contenido se editó sobre una versión que ya no es la última."""
+
+    def __init__(self, version_actual, contenido_actual):
+        super().__init__(f"El documento ya está en la versión {version_actual}.")
+        self.version_actual = version_actual
+        self.contenido_actual = contenido_actual
+
+
+def guardar_version(documento, autor, contenido, restaurada_desde=None, version_base=None):
+    """
+    Crea la siguiente versión del documento.
+
+    Control optimista: si se indica `version_base` y no coincide con la última
+    versión, no se crea nada y se lanza ConflictoVersion. El conflicto queda en
+    la bitácora (fuera de la transacción del guardado, para que la excepción no
+    revierta el registro; quien llame no debe envolver esto en otro atomic si
+    quiere conservar ese evento). Sin `version_base` se comporta como siempre.
+    """
     with transaction.atomic():
         documento = Documento.objects.select_for_update().get(pk=documento.pk)
 
         ultimo = VersionDocumento.objects.filter(documento=documento).order_by("-numero_version").first()
-        if ultimo is not None:
-                siguiente = ultimo.numero_version + 1
-        else:
-                siguiente = 1
+        actual = ultimo.numero_version if ultimo is not None else 0
 
-        version = VersionDocumento.objects.create(documento=documento,autor=autor,contenido=contenido,numero_version=siguiente,restaurada_desde=restaurada_desde,)
-    
-        accion = "RESTAURAR_VERSION" if restaurada_desde else "EDITAR_DOCUMENTO"
-        registrar_evento(
-            documento.espacio,
-            autor,
-            accion,
-            "DOCUMENTO",
-            documento.id,
-            {"numero_version": siguiente},
-        )
-    
-        return version
+        if version_base is None or version_base == actual:
+            siguiente = actual + 1
+            version = VersionDocumento.objects.create(documento=documento,autor=autor,contenido=contenido,numero_version=siguiente,restaurada_desde=restaurada_desde,)
+
+            accion = "RESTAURAR_VERSION" if restaurada_desde else "EDITAR_DOCUMENTO"
+            registrar_evento(
+                documento.espacio,
+                autor,
+                accion,
+                "DOCUMENTO",
+                documento.id,
+                {"numero_version": siguiente},
+            )
+            return version
+
+    # Conflicto: la transacción ya se cerró sin crear ninguna versión.
+    registrar_evento(
+        documento.espacio,
+        autor,
+        "CONFLICTO_VERSION",
+        "DOCUMENTO",
+        documento.id,
+        {"version_base": version_base, "version_actual": actual},
+    )
+    raise ConflictoVersion(actual, ultimo.contenido if ultimo is not None else "")
 
 def comparar_versiones(version_a, version_b):
     lineas = difflib.unified_diff(

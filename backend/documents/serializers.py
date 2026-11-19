@@ -5,11 +5,12 @@ from .services import obtener_nivel
 class DocumentoSerializer(serializers.ModelSerializer):
     mi_permiso = serializers.SerializerMethodField()
     contenido_actual = serializers.SerializerMethodField()
+    version_actual = serializers.SerializerMethodField()
     creador_nombre = serializers.CharField(source="creador.nombre", read_only=True)
 
     class Meta:
         model = Documento
-        fields = ["id", "espacio", "titulo", "fecha_creacion", "fecha_actualizacion", "mi_permiso", "contenido_actual", "creador_nombre"]
+        fields = ["id", "espacio", "titulo", "fecha_creacion", "fecha_actualizacion", "mi_permiso", "contenido_actual", "version_actual", "creador_nombre"]
 
     def get_mi_permiso(self, obj) -> str | None:
         request = self.context.get("request")
@@ -22,7 +23,11 @@ class DocumentoSerializer(serializers.ModelSerializer):
         if ultima is None:
             return ""
         return ultima.contenido
-    
+
+    def get_version_actual(self, obj) -> int:
+        ultima = obj.versiones.first()
+        return ultima.numero_version if ultima is not None else 0
+
 class VersionSerializer(serializers.ModelSerializer):
     autor_nombre = serializers.CharField(source="autor.nombre", read_only=True)
 
@@ -33,7 +38,9 @@ class VersionSerializer(serializers.ModelSerializer):
 
 class GuardarVersionSerializer(serializers.Serializer):
     contenido = serializers.CharField(allow_blank=True)
-    
+    # Opcional: número de la versión sobre la que se editó (control optimista).
+    version_base = serializers.IntegerField(min_value=0, required=False)
+
 class PermisoSerializer(serializers.ModelSerializer):
     class Meta:
         model = PermisoDocumento

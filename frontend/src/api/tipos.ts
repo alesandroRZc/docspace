@@ -8,6 +8,7 @@ export type Documento = {
   fecha_actualizacion: string;
   mi_permiso: Nivel | null;
   contenido_actual: string;
+  version_actual: number;
   creador_nombre: string;
 
   

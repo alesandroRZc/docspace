@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .serializers import DocumentoSerializer, GuardarVersionSerializer, VersionSerializer, AsignarPermisoSerializer, PermisoSerializer, CompararSerializer
-from .services import documentos_visibles, guardar_version, tiene_nivel, comparar_versiones
+from .services import documentos_visibles, guardar_version, tiene_nivel, comparar_versiones, ConflictoVersion
 from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError
 from .models import PermisoDocumento
@@ -65,7 +65,22 @@ class GuardarVersionView(APIView):
         entrada = GuardarVersionSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
 
-        version = guardar_version(documento, request.user, entrada.validated_data["contenido"])
+        try:
+            version = guardar_version(
+                documento,
+                request.user,
+                entrada.validated_data["contenido"],
+                version_base=entrada.validated_data.get("version_base"),
+            )
+        except ConflictoVersion as conflicto:
+            return Response(
+                {
+                    "detail": f"Otra persona guardó la versión {conflicto.version_actual} mientras editabas. Tu texto no se guardó; revísalo antes de volver a intentarlo.",
+                    "version_actual": conflicto.version_actual,
+                    "contenido_actual": conflicto.contenido_actual,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(VersionSerializer(version).data, status=status.HTTP_201_CREATED)
     
 class VersionListView(generics.ListAPIView):
