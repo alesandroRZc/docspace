@@ -1,4 +1,8 @@
+import logging
+
+from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
+from channels.layers import get_channel_layer
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Q
@@ -10,6 +14,7 @@ from audit.services import registrar_evento
 import difflib
 
 Usuario = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 JERARQUIA = {
@@ -114,6 +119,43 @@ def guardar_version(documento, autor, contenido, restaurada_desde=None, version_
         {"version_base": version_base, "version_actual": actual},
     )
     raise ConflictoVersion(actual, ultimo.contenido if ultimo is not None else "")
+
+def nombre_grupo(documento_id):
+    """Grupo del channel layer con todas las conexiones en vivo de un documento."""
+    return f"documento_{documento_id}"
+
+
+def notificar_version_guardada(version):
+    """
+    Avisa a las conexiones en vivo del documento que hay una versión nueva
+    (mismo mensaje "version_guardada" que emite el canal WebSocket).
+
+    Se llama desde las vistas REST de guardar y restaurar, y NO desde
+    guardar_version(), a propósito:
+    - el canal WebSocket ya avisa por su cuenta cuando guarda al liberar el
+      turno; avisar también dentro de guardar_version() duplicaría el mensaje;
+    - guardar_version() también la usan el seed_demo y la creación del
+      documento (v1), donde no hay nadie conectado a quien avisar.
+
+    El aviso sale después del commit (nadie se entera de una versión que
+    todavía podría revertirse). Si Redis falla, el guardado NO falla: la versión
+    ya existe y es inmutable, así que se registra un logger.warning y sigue.
+    """
+    documento_id = version.documento_id
+    numero = version.numero_version
+    mensaje = {"type": "version_guardada", "numero_version": numero, "autor": version.autor.nombre}
+
+    def enviar():
+        try:
+            async_to_sync(get_channel_layer().group_send)(nombre_grupo(documento_id), mensaje)
+        except Exception:
+            logger.warning(
+                "No se pudo avisar en tiempo real la versión %s del documento %s.",
+                numero, documento_id, exc_info=True,
+            )
+
+    transaction.on_commit(enviar)
+
 
 def ttl_presencia():
     return getattr(settings, "PRESENCIA_TTL", 30)

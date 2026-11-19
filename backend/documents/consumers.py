@@ -32,6 +32,7 @@ from .services import (
     borrador_en_vivo,
     nivel_alcanza,
     nivel_en_documento,
+    nombre_grupo,
     pedir_turno,
     presentes_en_documento,
     procesar_turno_vencido,
@@ -62,7 +63,7 @@ class DocumentoConsumer(AsyncJsonWebsocketConsumer):
         if nivel is None:
             return await self._rechazar(CIERRE_NO_ENCONTRADO)
 
-        self.grupo = f"documento_{self.documento_id}"
+        self.grupo = nombre_grupo(self.documento_id)
         await self.channel_layer.group_add(self.grupo, self.channel_name)
         await self.accept(subprotocol=SUBPROTOCOLO)
         await self.send_json({"tipo": "conectado", "nivel": nivel})

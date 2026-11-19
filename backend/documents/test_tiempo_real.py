@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from datetime import timedelta
 
@@ -10,6 +11,7 @@ from channels.testing import WebsocketCommunicator
 from channels_redis.core import RedisChannelLayer
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from audit.models import BitacoraAuditoria
@@ -932,3 +934,110 @@ def test_sin_permiso_al_guardar_automatico_se_descarta(escenario):
     descartes = eventos(doc, "BORRADOR_DESCARTADO")
     assert len(descartes) == 1
     assert "contenido" not in descartes[0].detalles
+
+
+# --- Avisos en vivo desde las vistas REST -----------------------------------
+
+def post_rest(usuario, ruta, datos=None):
+    cliente = APIClient()
+    cliente.force_authenticate(user=usuario)
+    return cliente.post(ruta, datos or {}, format="json")
+
+
+def tipos_de(mensajes):
+    return [m["tipo"] for m in mensajes]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_guardar_por_rest_avisa_a_los_conectados(escenario):
+    doc, gestor = escenario["doc"], escenario["gestor"]
+    guardar = database_sync_to_async(post_rest)
+
+    async def probar():
+        ws, _ = await abrir(doc.id, escenario["lector"])
+        respuesta = await guardar(gestor, f"/api/documents/{doc.id}/save/", {"contenido": "desde REST"})
+        aviso = await recibir_tipo(ws, "version_guardada")
+        await ws.disconnect()
+        return respuesta, aviso
+
+    respuesta, aviso = async_to_sync(probar)()
+
+    assert respuesta.status_code == 201
+    assert aviso == {"tipo": "version_guardada", "numero_version": 1, "autor": "gestor"}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_restaurar_por_rest_avisa_a_los_conectados(escenario):
+    doc, gestor = escenario["doc"], escenario["gestor"]
+    guardar_version(doc, gestor, "v1")
+    guardar_version(doc, gestor, "v2")
+    restaurar = database_sync_to_async(post_rest)
+
+    async def probar():
+        ws, _ = await abrir(doc.id, escenario["lector"])
+        respuesta = await restaurar(gestor, f"/api/documents/{doc.id}/versions/1/restore/")
+        aviso = await recibir_tipo(ws, "version_guardada")
+        await ws.disconnect()
+        return respuesta, aviso
+
+    respuesta, aviso = async_to_sync(probar)()
+
+    assert respuesta.status_code == 201
+    assert aviso == {"tipo": "version_guardada", "numero_version": 3, "autor": "gestor"}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_guardar_por_rest_con_conflicto_no_avisa(escenario):
+    doc, gestor = escenario["doc"], escenario["gestor"]
+    guardar_version(doc, gestor, "v1")
+    guardar = database_sync_to_async(post_rest)
+
+    async def probar():
+        ws, _ = await abrir(doc.id, escenario["lector"])
+        respuesta = await guardar(gestor, f"/api/documents/{doc.id}/save/", {"contenido": "viejo", "version_base": 0})
+        recibidos = await pendientes(ws)
+        await ws.disconnect()
+        return respuesta, recibidos
+
+    respuesta, recibidos = async_to_sync(probar)()
+
+    assert respuesta.status_code == 409
+    assert "version_guardada" not in tipos_de(recibidos)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_guardar_por_rest_sin_permiso_no_avisa(escenario):
+    doc = escenario["doc"]
+    guardar = database_sync_to_async(post_rest)
+
+    async def probar():
+        ws, _ = await abrir(doc.id, escenario["gestor"])
+        respuesta = await guardar(escenario["lector"], f"/api/documents/{doc.id}/save/", {"contenido": "intento"})
+        recibidos = await pendientes(ws)
+        await ws.disconnect()
+        return respuesta, recibidos
+
+    respuesta, recibidos = async_to_sync(probar)()
+
+    assert respuesta.status_code == 403
+    assert "version_guardada" not in tipos_de(recibidos)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_si_redis_falla_el_guardado_no_falla_y_queda_un_warning(escenario, monkeypatch, caplog):
+    doc, gestor = escenario["doc"], escenario["gestor"]
+
+    class CapaCaida:
+        async def group_send(self, grupo, mensaje):
+            raise ConnectionError("Redis no disponible")
+
+    monkeypatch.setattr("documents.services.get_channel_layer", lambda: CapaCaida())
+
+    with caplog.at_level(logging.WARNING, logger="documents.services"):
+        respuesta = post_rest(gestor, f"/api/documents/{doc.id}/save/", {"contenido": "igual se guarda"})
+
+    assert respuesta.status_code == 201
+    assert [v.contenido for v in versiones_de(doc)] == ["igual se guarda"]
+    advertencias = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(advertencias) == 1
+    assert "No se pudo avisar en tiempo real la versión 1" in advertencias[0].getMessage()

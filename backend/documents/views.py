@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .serializers import DocumentoSerializer, GuardarVersionSerializer, VersionSerializer, AsignarPermisoSerializer, PermisoSerializer, CompararSerializer
-from .services import documentos_visibles, guardar_version, tiene_nivel, comparar_versiones, ConflictoVersion
+from .services import documentos_visibles, guardar_version, tiene_nivel, comparar_versiones, ConflictoVersion, notificar_version_guardada
 from django.contrib.auth import get_user_model
 from rest_framework.exceptions import ValidationError
 from .models import PermisoDocumento
@@ -81,6 +81,9 @@ class GuardarVersionView(APIView):
                 },
                 status=status.HTTP_409_CONFLICT,
             )
+        # El aviso en vivo sale desde la vista y no desde guardar_version():
+        # ver el porqué en notificar_version_guardada().
+        notificar_version_guardada(version)
         return Response(VersionSerializer(version).data, status=status.HTTP_201_CREATED)
     
 class VersionListView(generics.ListAPIView):
@@ -151,4 +154,6 @@ class RestaurarVersionView(APIView):
 
         origen = get_object_or_404(documento.versiones, numero_version=numero)
         nueva = guardar_version(documento, request.user, origen.contenido, restaurada_desde=origen)
+        # Igual que al guardar: el aviso en vivo sale desde la vista.
+        notificar_version_guardada(nueva)
         return Response(VersionSerializer(nueva).data, status=status.HTTP_201_CREATED)
