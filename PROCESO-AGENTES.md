@@ -66,3 +66,13 @@
 - **Verificación por mutación (iniciativa del agente):** hizo que el latido renovara el turno; la prueba `test_un_latido_sin_ediciones_no_renueva_el_turno` falló. Restauró el archivo y lo verificó con `cmp`.
 - **Trade-off:** tres pruebas esperan la expiración real de Redis (1-2 s), así que la suite tarda ~55 s, a cambio de probar la expiración real y no un reloj simulado.
 - **Verificación:** 43 pruebas pasan.
+
+
+### 8. Paso 6 — Edición en vivo y guardado
+- **Requisito agregado por mí (no estaba en el plan):** límite de tamaño para `editar` (200 000 caracteres, configurable): un mensaje que lo supera recibe 413, no se retransmite ni se guarda. Evita que un editor sature Redis o a los demás clientes.
+- **Decisión validada:** el agente propuso, y yo aprobé, la estrategia ante conflictos al guardar: en el guardado manual el editor conserva turno y borrador y decide (reintentar confirmando la versión que vio, o descartar); en el guardado automático no se sobrescribe la otra versión y el texto se conserva completo en la bitácora (`BORRADOR_EN_CONFLICTO`). Si el autor perdió el permiso, no se guarda nada y la bitácora no incluye el texto. Descarté la propuesta de limitar el tamaño del frame en Daphne (queda como mejora futura).
+- **Bug detectado por mí en la revisión del diff:** al pasar de 2 a 3 claves en Redis, `tomar_turno` quedó con `numkeys=2`, lo que habría desplazado los argumentos y roto todo `pedir_turno`. El agente lo confirmó, lo corrigió y revisó el resto de llamadas.
+- **Puntos que verifiqué:** que el borrador se guarde en la base de datos antes de liberar el turno; que un conflicto manual no libere el turno; que el editor no reciba su propio cambio (sin eco).
+- **Depuración con evidencia:** la prueba de "sin eco" falló. El agente no asumió la causa: la investigó (era un aviso de presencia), reescribió la prueba para comprobar exactamente la propiedad (ningún mensaje `cambio` al editor) y demostró con un mutante (sin el filtro de origen) que la nueva prueba detecta un eco real. Restauró el archivo y lo verificó con `cmp`.
+- **Verificación:** 57 pruebas pasan, incluidas las 10 de la Fase 1.
+- **Limitación conocida:** recuperar un `BORRADOR_EN_CONFLICTO` es manual (desde la API de auditoría); no tiene interfaz.
