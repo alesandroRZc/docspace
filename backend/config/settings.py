@@ -92,7 +92,18 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [REDIS_URL]},
+        "CONFIG": {
+            # socket_timeout explícito y MAYOR que 5 s, a propósito:
+            # - channels-redis espera mensajes para cada conexión con una
+            #   lectura bloqueante BZPOPMIN de 5 s (brpop_timeout).
+            # - redis-py 8 usa socket_timeout=5 s por defecto.
+            # Con los dos en 5 s, si una conexión pasa ~5 s sin mensajes el
+            # cliente se rinde antes de que Redis conteste y el consumer muere
+            # con "redis.exceptions.TimeoutError", cerrando el WebSocket.
+            # 15 s deja margen de sobra. Lo cubre la prueba
+            # test_conexion_inactiva_mas_de_5_segundos_sigue_abierta_y_recibe.
+            "hosts": [{"address": REDIS_URL, "socket_timeout": 15}],
+        },
     },
 }
 

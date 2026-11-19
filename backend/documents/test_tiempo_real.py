@@ -39,6 +39,30 @@ def test_channel_layer_redis_ida_y_vuelta():
     assert mensaje == {"type": "prueba", "texto": "hola"}
 
 
+@pytest.mark.django_db(transaction=True)
+def test_conexion_inactiva_mas_de_5_segundos_sigue_abierta_y_recibe(escenario):
+    # Regresión: redis-py 8 trae socket_timeout=5 s y channels-redis espera
+    # mensajes con BZPOPMIN de 5 s. Sin margen entre ambos, una conexión que
+    # no recibía nada durante ~5 s moría con redis TimeoutError.
+    doc = escenario["doc"]
+
+    async def probar():
+        ws_a, _ = await abrir(doc.id, escenario["gestor"])
+        await asyncio.sleep(6.5)  # inactiva: ni envía ni recibe nada
+        ws_b, _ = await abrir(doc.id, escenario["lector"])
+        aviso = await recibir_tipo(ws_a, "presencia")  # A sigue recibiendo
+        await ws_a.send_json_to({"tipo": "latido"})     # y sigue aceptando mensajes
+        sigue_abierta = await ws_a.receive_nothing(timeout=0.5)
+        await ws_b.disconnect()
+        await ws_a.disconnect()
+        return aviso, sigue_abierta
+
+    aviso, sigue_abierta = async_to_sync(probar)()
+
+    assert nombres(aviso) == ["gestor", "lector"]
+    assert sigue_abierta  # ni cierre ni error tras el latido
+
+
 # --- Utilidades -------------------------------------------------------------
 
 def crear_usuario(email, tipo="COLABORADOR"):
