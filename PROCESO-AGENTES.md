@@ -48,3 +48,21 @@
 - **Verificación por mutación:** pedí al agente quitar temporalmente `AllowedHostsOriginValidator`; la prueba falló (`assert True is False`: un origen ajeno logró conectarse). Restauró el archivo y lo verificó byte a byte con `cmp`; yo lo confirmé con `git diff`.
 - **Limitación conocida:** el usuario se carga al conectar; si una cuenta se desactiva estando conectada, el socket sigue activo hasta que vence el token (máx. 60 min). Los permisos sí se revalidan en cada mensaje.
 - **Verificado a mano:** desde la consola del navegador abrí el WebSocket con mi token y recibí `{"tipo": "conectado", "nivel": "ADMINISTRACION"}`.
+
+
+### 6. Paso 4 — Presencia
+- **Aceptado:** módulo `estado_vivo.py` solo con operaciones de Redis (sin permisos); sorted set con una entrada por pestaña y lista de usuarios únicos; purga de pestañas que dejaron de latir; el latido solo mantiene la presencia (respetó la corrección del plan); los demás conectados solo ven `id` y `nombre`. Las pruebas usan la base 15 de Redis con `flushdb`, sin tocar los datos de desarrollo.
+- **Error del agente (detectado y rechazado):** intentó agregar las pruebas con `cat >>` desde Bash, evitando la revisión del diff. Además, el código que proponía tenía una prueba sin encabezado (`@pytest.mark.django_db` y `def`), lo que habría impedido ejecutar todo el archivo de pruebas. Rechacé el comando, pedí usar la herramienta de edición y corregir la prueba. Agregué la regla correspondiente a CLAUDE.md.
+- **Sospecha verificada:** pregunté si la función `_miembro()` estaba definida porque no aparecía en la vista del diff; el agente confirmó que sí existía (falsa alarma por la vista parcial).
+- **Desviación avisada:** la prueba de purga simula un latido antiguo en lugar de reducir el TTL por configuración.
+- **Verificación:** 32 pruebas pasan, incluidas las 10 de la Fase 1 sin cambios.
+
+
+### 7. Paso 5 — Turno de edición
+- **Decisiones avisadas antes de escribir** (aplicando la regla de CLAUDE.md): `editar` mínimo en este paso; un marcador `turno:anunciado` consumido con un script Lua atómico para detectar el vencimiento (Redis no avisa cuando expira una clave); extraer `nivel_alcanza()` de `tiene_nivel()` sin cambiar su comportamiento, para que el canal no duplique la comparación de niveles.
+- **Aceptado:** turno en Redis con 4 scripts Lua atómicos (tomar con `SET NX`, renovar y liberar solo si el canal es el dueño, detectar vencimiento con `GETDEL` para avisar una sola vez); reglas en `services.py`; el canal interno nunca se expone a los demás.
+- **Punto que verifiqué:** que la detección de vencimiento corra antes de procesar `pedir_turno`, para que un turno vencido siempre se anuncie (y en el Paso 6 su borrador se guarde) antes de entregarlo a otro editor.
+- **Error del agente:** una prueba leía un mensaje equivocado (no consumía su propio aviso de turno concedido). Lo detectó al correr las pruebas; verifiqué que la corrección no debilitara las aserciones.
+- **Verificación por mutación (iniciativa del agente):** hizo que el latido renovara el turno; la prueba `test_un_latido_sin_ediciones_no_renueva_el_turno` falló. Restauró el archivo y lo verificó con `cmp`.
+- **Trade-off:** tres pruebas esperan la expiración real de Redis (1-2 s), así que la suite tarda ~55 s, a cambio de probar la expiración real y no un reloj simulado.
+- **Verificación:** 43 pruebas pasan.
