@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Anchor, Badge, Button, Container, Group, Loader, Stack, Textarea, Title } from "@mantine/core";
+import { Alert, Anchor, Badge, Button, Container, Group, Loader, Stack, Textarea, Title, Text } from "@mantine/core";
 import { api } from "../api/cliente";
 import { tieneNivel, type Documento } from "../api/tipos";
 import HistorialVersiones from "../components/HistorialVersiones";
@@ -66,6 +66,7 @@ export default function DocumentoPage() {
           <Title order={2}>{documento.titulo}</Title>
           <Badge size="lg">{documento.mi_permiso}</Badge>
         </Group>
+        <Text size="sm" c="dimmed">Creado por {documento.creador_nombre}</Text>
 
         <Textarea
           value={contenido}

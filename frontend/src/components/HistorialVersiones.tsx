@@ -39,6 +39,7 @@ export default function HistorialVersiones({ documentoId, miPermiso }: Props) {
             <Group>
               <Badge variant="light">v{version.numero_version}</Badge>
               <Text size="sm">{new Date(version.fecha_creacion).toLocaleString()}</Text>
+              <Text size="sm" c="dimmed">por {version.autor_nombre}</Text>
               {version.restaurada_desde && <Badge color="grape">Restaurada</Badge>}
             </Group>
 

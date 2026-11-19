@@ -8,6 +8,7 @@ export type Documento = {
   fecha_actualizacion: string;
   mi_permiso: Nivel | null;
   contenido_actual: string;
+  creador_nombre: string;
 
   
 }
@@ -29,6 +30,7 @@ export type Version = {
   autor: string;
   fecha_creacion: string;
   restaurada_desde: string | null;
+  autor_nombre: string;
 };
 
 export type Comparacion = {

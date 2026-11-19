@@ -73,8 +73,8 @@ class VersionListView(generics.ListAPIView):
 
     def get_queryset(self):
         documento = get_object_or_404(documentos_visibles(self.request.user), pk=self.kwargs["pk"])
-        return documento.versiones.all()
-    
+        return documento.versiones.select_related("autor")
+        
 class AsignarPermisoView(APIView):
     @extend_schema(request=AsignarPermisoSerializer, responses=PermisoSerializer)
     def post(self, request, pk):
