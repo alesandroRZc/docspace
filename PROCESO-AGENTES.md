@@ -95,3 +95,60 @@
 - **Lint:** desapareció el error heredado de la Fase 1 (`react-hooks/set-state-in-effect`); `npm run lint` queda en 0 problemas.
 - **Honestidad del agente:** aclaró que el proyecto no tiene pruebas automáticas de frontend y que solo había verificado con lint y build; el comportamiento debía comprobarse a mano.
 - **Verificado a mano con tres navegadores (editor, gestor y lector):** el editor toma el turno y los demás ven "Editando: …" y el texto en vivo; el lector no tiene botón de edición; al guardar, el historial se actualiza en todos sin recargar; el guardado automático tras 20 s de inactividad libera el turno; con el editor escribiendo, una restauración hecha por el gestor muestra el aviso sin borrar su texto, y al guardar aparece el conflicto con ambos textos lado a lado; guardar encima crea la versión nueva y libera el turno.
+
+
+## Resumen
+
+### Qué acepté tal cual
+- La arquitectura del tiempo real: Django Channels con Redis, consumer delgado que reutiliza `documentos_visibles`/`obtener_nivel`, estado efímero en Redis con scripts Lua atómicos, y JWT por subprotocolo.
+- El diseño de conflictos: turno de edición más control optimista, guardado manual con decisión del usuario y guardado automático que nunca sobrescribe (el texto queda en la bitácora).
+- Las pruebas de mutación que el agente empezó a hacer por iniciativa propia a partir del Paso 5.
+
+### Qué modifiqué o agregué yo
+- Indicador de presencia (el agente lo había omitido del plan).
+- El turno solo se renueva al editar, nunca con el latido: el vencimiento lo garantiza el servidor.
+- Límite de tamaño de 200 000 caracteres para los mensajes `editar` (413).
+- Pruebas que faltaban: origen no permitido, uso de un refresh token y conexión inactiva más de 5 s.
+- Aviso en vivo al guardar o restaurar por REST, detectado probando a mano.
+- No reemplazar el texto de quien está editando cuando llega una versión nueva.
+- Registrar con `logger.warning` el fallo del aviso por Redis, en vez de ignorarlo.
+- Corrección de la estructura del proyecto en `ARQUITECTURA.md`, que no coincidía con el código.
+
+### Qué descarté
+- Token en la query string o en el primer mensaje del WebSocket (riesgos documentados en `ARQUITECTURA.md`, sección 8.3).
+- Cambiar el comando de arranque para usar Daphne: bastó con agregarlo a `INSTALLED_APPS`.
+- Agregar código con `cat >>` desde Bash, porque evitaba la revisión del diff.
+- Fijar `redis<8` para esquivar el timeout: se corrigió la configuración.
+- Limitar el tamaño del frame en Daphne: quedó como mejora futura.
+
+## Errores del agente y cómo los detecté
+
+| # | Error | Cómo lo detecté |
+|---|---|---|
+| 1 | Omitió el indicador de presencia en su análisis inicial | Revisión del análisis (plan mode) |
+| 2 | El turno se renovaba con el latido | Revisión del plan |
+| 3 | Modificó `DocumentoPage.tsx` fuera del plan sin avisar | Revisión del diff |
+| 4 | Intentó agregar pruebas con `cat >>` (sin diff), y una prueba venía sin encabezado | Revisión del comando antes de aprobarlo |
+| 5 | `tomar_turno` quedó con `numkeys=2` al pasar a 3 claves en Redis | Revisión del diff |
+| 6 | Una prueba leía un mensaje equivocado (no consumía su propio aviso de turno) | Ejecución de las pruebas |
+| 7 | La prueba "sin eco" fallaba por un aviso de presencia | Ejecución de las pruebas + investigación con evidencia |
+| 8 | El servidor de desarrollo quedó caído tras recargarse a mitad de una edición, con las pruebas en verde | Prueba manual (el login fallaba) + logs |
+| 9 | `TimeoutError` de Redis cada ~5 s, presente desde el Paso 3 | Prueba manual (reconexiones visibles) + logs |
+| 10 | Guardar o restaurar por REST no avisaba a los demás conectados | Prueba manual con dos navegadores |
+
+## Cómo verifiqué que no se rompió la Fase 1
+- **Las 10 pruebas originales nunca se modificaron** y pasaron en cada paso (63 en total al final).
+- Los cambios al código de la Fase 1 (`guardar_version`, `tiene_nivel`) fueron opcionales o refactors sin cambio de comportamiento, cubiertos por esas pruebas.
+- Después de cada paso de infraestructura comprobé a mano en el navegador el login, los permisos, el historial y la gestión de acceso.
+- **Clon limpio desde GitHub:** cloné el repositorio en otra carpeta, seguí el README al pie de la letra y el proyecto levantó con un solo comando, aplicando todas las migraciones desde cero.
+- La rama `fase-1` no recibió cambios y está etiquetada como `fase-1-final`.
+
+## Reglas que agregué a CLAUDE.md durante el proceso
+1. **No modificar archivos fuera del plan sin avisar** → tras el error 3.
+2. **Editar archivos solo con la herramienta de edición, nunca con comandos de shell** → tras el error 4.
+3. **Revisar los logs del servidor al terminar cada paso** → tras el error 8. Esta regla permitió encontrar el error 9.
+
+## Lecciones
+- **Revisar el plan antes del código** evitó errores de diseño (1 y 2) que habrían sido caros de corregir después.
+- **Las pruebas automáticas no bastan:** tres errores importantes (8, 9 y 10) solo aparecieron al usar la aplicación de verdad.
+- **Cada error se convirtió en una regla o una prueba**, para que no se repita.
