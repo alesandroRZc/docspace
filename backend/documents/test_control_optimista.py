@@ -5,7 +5,8 @@ from rest_framework.test import APIClient
 from audit.models import BitacoraAuditoria
 from documents.models import Documento, VersionDocumento
 from documents.services import ConflictoVersion, guardar_version
-from workspaces.models import EspacioTrabajo
+from documents.models import PermisoDocumento
+from workspaces.models import EspacioTrabajo, MiembroEspacio
 
 Usuario = get_user_model()
 
@@ -78,3 +79,21 @@ def test_detalle_expone_version_actual(doc, gestor):
     r = cliente.get(f"/api/documents/{doc.id}/")
 
     assert r.json()["version_actual"] == 1
+
+
+@pytest.mark.django_db
+def test_documento_y_versiones_muestran_el_nombre_del_autor(doc, gestor):
+    # La v2 la guarda otra persona: así se comprueba que autor_nombre es el
+    # autor de cada versión y no el creador del documento.
+    ana = Usuario.objects.create_user(email="ana@x.com", username="ana", password="Clave12345", nombre="Ana", tipo_cuenta="COLABORADOR")
+    MiembroEspacio.objects.create(espacio=doc.espacio, usuario=ana)
+    PermisoDocumento.objects.create(documento=doc, usuario=ana, nivel="EDICION")
+    guardar_version(doc, ana, "v2")
+    cliente = APIClient()
+    cliente.force_authenticate(user=gestor)
+
+    detalle = cliente.get(f"/api/documents/{doc.id}/").json()
+    versiones = cliente.get(f"/api/documents/{doc.id}/versions/").json()
+
+    assert detalle["creador_nombre"] == "G"
+    assert [(v["numero_version"], v["autor_nombre"]) for v in versiones] == [(2, "Ana"), (1, "G")]
