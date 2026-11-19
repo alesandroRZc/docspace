@@ -66,6 +66,7 @@
 - **Verificación por mutación (iniciativa del agente):** hizo que el latido renovara el turno; la prueba `test_un_latido_sin_ediciones_no_renueva_el_turno` falló. Restauró el archivo y lo verificó con `cmp`.
 - **Trade-off:** tres pruebas esperan la expiración real de Redis (1-2 s), así que la suite tarda ~55 s, a cambio de probar la expiración real y no un reloj simulado.
 - **Verificación:** 43 pruebas pasan.
+- **Incidente detectado al probar a mano:** el login fallaba. Los logs mostraban un `ImportError`: el servidor de desarrollo se había recargado a mitad de la edición del Paso 6 (con `services.py` ya cambiado y `consumers.py` todavía no) y quedó caído. Las 57 pruebas pasaban porque `pytest` arranca un proceso nuevo con los archivos ya completos. Lo resolví reiniciando el backend y agregué a CLAUDE.md la regla de verificar los logs del servidor al terminar cada paso. **Lección:** las pruebas automáticas no reemplazan comprobar la aplicación en ejecución.
 
 
 ### 8. Paso 6 — Edición en vivo y guardado
@@ -76,3 +77,21 @@
 - **Depuración con evidencia:** la prueba de "sin eco" falló. El agente no asumió la causa: la investigó (era un aviso de presencia), reescribió la prueba para comprobar exactamente la propiedad (ningún mensaje `cambio` al editor) y demostró con un mutante (sin el filtro de origen) que la nueva prueba detecta un eco real. Restauró el archivo y lo verificó con `cmp`.
 - **Verificación:** 57 pruebas pasan, incluidas las 10 de la Fase 1.
 - **Limitación conocida:** recuperar un `BORRADOR_EN_CONFLICTO` es manual (desde la API de auditoría); no tiene interfaz.
+
+
+### 9. Paso 7 — Frontend: conexión y presencia
+- **Aceptado:** hook `useDocumentoEnVivo` (JWT por subprotocolo, nunca en la URL; URL `ws`/`wss` derivada de `VITE_API_URL`; latido cada 10 s; reconexión con espera exponencial, sin reintentar ante 4401/4404) y componente de presencia con avatares.
+- **Línea base:** antes de tocar nada, el agente corrió lint y build y reportó un error de lint heredado de la Fase 1 (`react-hooks/set-state-in-effect` en `DocumentoPage.tsx`); acordamos no introducir errores nuevos y resolverlo en el Paso 8.
+- **Verificado a mano con dos navegadores:** el gestor y un usuario de solo lectura se ven mutuamente; al salir, el usuario desaparece de la lista; el de solo lectura no ve controles de edición. También vi la reconexión automática cuando reinicié el backend.
+- **Incidente 1 (servidor caído):** el login fallaba. Los logs mostraban un `ImportError`: el servidor de desarrollo se recargó a mitad de la edición del Paso 6 y quedó caído, mientras las 57 pruebas pasaban porque `pytest` arranca un proceso nuevo. Lo reinicié y agregué a CLAUDE.md la regla de revisar los logs del servidor al terminar cada paso. **Lección:** las pruebas automáticas no reemplazan comprobar la aplicación en ejecución.
+- **Incidente 2 (bug detectado al probar a mano):** vi reconexiones constantes. Con la regla nueva, el agente encontró un `TimeoutError` de Redis cada ~5 s: el `socket_timeout` por defecto de redis-py 8 (5 s) chocaba con la espera bloqueante de 5 s de channels-redis. Venía desde el Paso 3 y ninguna prueba lo detectaba porque ninguna dejaba una conexión inactiva más de 5 s. Se corrigió en un commit aparte (`fix:`) siguiendo el orden prueba primero: la prueba de regresión falló sin el arreglo con el mismo error de los logs y pasó con él (58/58). Confirmé en los logs y en el navegador que la conexión ya no se corta.
+
+
+### 10. Paso 8 — Frontend: turno, edición en vivo y conflictos
+- **Requisito agregado por mí (detectado probando a mano):** los guardados y restauraciones por REST no avisaban a los demás conectados; había que recargar para ver la versión nueva. Lo agregué al Paso 8. El agente propuso, y yo validé, avisar desde las vistas REST (no desde `guardar_version()`, para evitar avisos duplicados con el canal WebSocket), con `transaction.on_commit` (sin avisos de versiones que se reviertan) y sin hacer fallar el guardado si falla el aviso. Agregué la condición de registrar ese fallo con `logger.warning`. Se cubrió con 5 pruebas (incluida una con Redis caído simulado) y se verificó con mutantes que las pruebas fallan si se quita el aviso. Va en un commit `feat:` del backend aparte.
+- **Requisito agregado por mí:** si el usuario tiene el turno, una versión que llega no reemplaza el texto de su editor: se muestra un aviso y el conflicto se resuelve al guardar.
+- **Decisiones del agente, avisadas antes de escribir:** el aviso de conflicto como componente dentro de `AvisoTurno.tsx` (para no crear un archivo fuera del plan); una pestaña considera el turno como suyo solo si lo pidió y el usuario coincide (evita que otra pestaña del mismo usuario edite por accidente); el texto pendiente del envío diferido (300 ms) se envía al salir del editor, al guardar y antes de cerrar la pestaña; si se pierde el turno con texto sin enviar, se muestra para copiarlo.
+- **Autocorrección del agente:** deshabilitó el botón Editar hasta tener cargado el usuario actual, para evitar quedar con el turno tomado sin que la pestaña lo reconociera como propio.
+- **Lint:** desapareció el error heredado de la Fase 1 (`react-hooks/set-state-in-effect`); `npm run lint` queda en 0 problemas.
+- **Honestidad del agente:** aclaró que el proyecto no tiene pruebas automáticas de frontend y que solo había verificado con lint y build; el comportamiento debía comprobarse a mano.
+- **Verificado a mano con tres navegadores (editor, gestor y lector):** el editor toma el turno y los demás ven "Editando: …" y el texto en vivo; el lector no tiene botón de edición; al guardar, el historial se actualiza en todos sin recargar; el guardado automático tras 20 s de inactividad libera el turno; con el editor escribiendo, una restauración hecha por el gestor muestra el aviso sin borrar su texto, y al guardar aparece el conflicto con ambos textos lado a lado; guardar encima crea la versión nueva y libera el turno.
