@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { Alert, Button, Container, Paper, PasswordInput, Stack, TextInput, Title } from "@mantine/core";
+import { Alert, Anchor, Button, Container, Paper, PasswordInput, Stack, TextInput, Title } from "@mantine/core";
 import { api, guardarToken } from "../api/cliente";
+import { Link, useNavigate } from "react-router-dom";
 
 type RespuestaLogin = {
   access: string;
@@ -53,6 +53,9 @@ export default function LoginPage() {
             <Button type="submit" loading={login.isPending}>
               Iniciar sesión
             </Button>   
+            <Anchor component={Link} to="/registro" ta="center" size="sm">
+              ¿No tienes cuenta? Regístrate
+            </Anchor>
           </Stack>
         </form>
       </Paper>

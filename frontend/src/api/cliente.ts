@@ -30,7 +30,8 @@ export async function api<T>(ruta: string, opciones: RequestInit = {}): Promise<
 
   if (!respuesta.ok) {
     const error = await respuesta.json().catch(() => ({}));
-    throw new Error(error.detail ?? "Ocurrió un error inesperado.");
+    const mensaje = error.detail ?? (Object.values(error).flat().join(" ") || "Ocurrió un error inesperado.");
+    throw new Error(mensaje);
   }
 
   if (respuesta.status === 204) {
@@ -39,3 +40,4 @@ export async function api<T>(ruta: string, opciones: RequestInit = {}): Promise<
 
   return respuesta.json();
 }
+    
