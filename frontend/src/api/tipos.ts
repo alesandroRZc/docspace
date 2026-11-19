@@ -30,3 +30,9 @@ export type Version = {
   fecha_creacion: string;
   restaurada_desde: string | null;
 };
+
+export type Comparacion = {
+  version_a: number;
+  version_b: number;
+  diferencias: string[];
+};

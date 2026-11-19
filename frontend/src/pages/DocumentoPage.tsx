@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Anchor, Badge, Button, Container, Group, Loader, Stack, Textarea, Title } from "@mantine/core";
 import { api } from "../api/cliente";
 import { tieneNivel, type Documento } from "../api/tipos";
 import HistorialVersiones from "../components/HistorialVersiones";
+import CompararVersiones from "../components/CompararVersiones";
 
 export default function DocumentoPage() {
   const { id } = useParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [contenido, setContenido] = useState("");
 
   const { data: documento, isLoading, error } = useQuery({
@@ -34,6 +36,14 @@ export default function DocumentoPage() {
     },
   });
 
+  const eliminar = useMutation({
+    mutationFn: () => api(`/documents/${id}/`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documentos"] });
+      navigate("/documentos");
+    },
+  });
+
   if (isLoading) return <Container py="xl"><Loader /></Container>;
   if (error || !documento) {
     return (
@@ -45,6 +55,7 @@ export default function DocumentoPage() {
   }
 
   const puedeEditar = tieneNivel(documento.mi_permiso, "EDICION");
+  const puedeAdministrar = tieneNivel(documento.mi_permiso, "ADMINISTRACION");
 
   return (
     <Container py="xl">
@@ -67,14 +78,30 @@ export default function DocumentoPage() {
         {guardar.isSuccess && <Alert color="green">Versión guardada.</Alert>}
         {guardar.error && <Alert color="red">{guardar.error.message}</Alert>}
 
-        {puedeEditar && (
-          <Group justify="flex-end">
+        <Group justify="flex-end">
+          {puedeAdministrar && (
+            <Button
+              color="red"
+              variant="light"
+              loading={eliminar.isPending}
+              onClick={() => {
+                if (window.confirm("¿Eliminar este documento? Su historial se conservará.")) {
+                  eliminar.mutate();
+                }
+              }}
+            >
+              Eliminar documento
+            </Button>
+          )}
+          {puedeEditar && (
             <Button onClick={() => guardar.mutate()} loading={guardar.isPending}>
               Guardar nueva versión
             </Button>
-          </Group>
-        )}
+          )}
+        </Group>
+
         <HistorialVersiones documentoId={documento.id} miPermiso={documento.mi_permiso} />
+        <CompararVersiones documentoId={documento.id} />
       </Stack>
     </Container>
   );
