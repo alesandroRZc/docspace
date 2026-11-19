@@ -7,12 +7,15 @@ import { tieneNivel, type Documento } from "../api/tipos";
 import HistorialVersiones from "../components/HistorialVersiones";
 import CompararVersiones from "../components/CompararVersiones";
 import GestionAcceso from "../components/GestionAcceso";
+import PresenciaDocumento from "../components/PresenciaDocumento";
+import { useDocumentoEnVivo } from "../api/tiempoReal";
 
 export default function DocumentoPage() {
   const { id } = useParams();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [contenido, setContenido] = useState("");
+  const enVivo = useDocumentoEnVivo(id);
 
   const { data: documento, isLoading, error } = useQuery({
     queryKey: ["documento", id],
@@ -68,6 +71,7 @@ export default function DocumentoPage() {
           <Badge size="lg">{documento.mi_permiso}</Badge>
         </Group>
         <Text size="sm" c="dimmed">Creado por {documento.creador_nombre}</Text>
+        <PresenciaDocumento conexion={enVivo.conexion} presentes={enVivo.presentes} />
 
         <Textarea
           value={contenido}
