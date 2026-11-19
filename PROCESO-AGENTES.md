@@ -1,5 +1,19 @@
 # Proceso con agentes — Fase 2
 
+
+## Herramientas y forma de trabajo
+
+| Herramienta | Uso |
+|---|---|
+| **Claude Code** (CLI, modelo Claude Opus 5.5) | Agente de desarrollo: exploró el código, propuso el plan y escribió los cambios de backend, frontend y pruebas. |
+| **Claude** (chat) | Asistente de apoyo: me ayudó a redactar CLAUDE.md y los prompts, y a revisar los diffs del agente antes de aprobarlos. Todo lo que entró al repositorio pasó por mi revisión. |
+
+**Método:**
+- Antes de que el agente escribiera código, fijé las reglas de arquitectura en `CLAUDE.md` (primer commit de la rama `fase-2`).
+- Plan primero: el agente trabajó en *plan mode* hasta que aprobé un plan de 9 pasos.
+- Aprobación manual de cada edición y comando. Nunca usé el modo automático.
+- Un commit por paso, hecho por mí después de revisar y correr las pruebas.
+
 ## Bitácora
 
 ### 1. Verificación de comprensión (plan mode)
@@ -33,3 +47,4 @@
 - **Modificado a mano:** detecté que no había pruebas para el validador de origen ni para el uso de un refresh token. Pedí ambas, diseñadas para fallar si se quita la protección correspondiente.
 - **Verificación por mutación:** pedí al agente quitar temporalmente `AllowedHostsOriginValidator`; la prueba falló (`assert True is False`: un origen ajeno logró conectarse). Restauró el archivo y lo verificó byte a byte con `cmp`; yo lo confirmé con `git diff`.
 - **Limitación conocida:** el usuario se carga al conectar; si una cuenta se desactiva estando conectada, el socket sigue activo hasta que vence el token (máx. 60 min). Los permisos sí se revalidan en cada mensaje.
+- **Verificado a mano:** desde la consola del navegador abrí el WebSocket con mi token y recibí `{"tipo": "conectado", "nivel": "ADMINISTRACION"}`.
