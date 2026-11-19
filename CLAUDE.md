@@ -39,3 +39,4 @@
 - El WebSocket se autentica con el JWT y los permisos se verifican al conectar y en cada mensaje.
 - Un usuario con LECTURA recibe cambios pero el servidor rechaza lo que intente emitir.
 - Conflictos: **turno de edición** (un editor a la vez, los demás ven quién edita) + **control optimista** por número de versión como red de seguridad. Nunca perder datos en silencio.
+- No modificar archivos fuera del plan aprobado sin avisarme antes y explicar por qué.
