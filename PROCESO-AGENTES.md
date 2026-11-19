@@ -152,3 +152,12 @@
 - **Revisar el plan antes del código** evitó errores de diseño (1 y 2) que habrían sido caros de corregir después.
 - **Las pruebas automáticas no bastan:** tres errores importantes (8, 9 y 10) solo aparecieron al usar la aplicación de verdad.
 - **Cada error se convirtió en una regla o una prueba**, para que no se repita.
+
+### 11. Valor añadido: sección «Más allá de lo pedido» y prueba del autor
+
+**Qué pedí:** documentar en el README lo que implementamos fuera de los requisitos, indicando dónde verificar cada punto, y que el agente primero comprobara en el código que cada uno existía y si tenía prueba automatizada.
+
+**Qué hizo bien el agente:**
+- Revisó los siete puntos antes de escribir y reportó con honestidad que tres no tenían prueba automatizada (pruebas de mutación, reconexión y autor visible). También aclaró que no tenía el PDF y que no podía confirmar qué estaba fuera de los requisitos.
+- Antes de enlazar PROCESO-AGENTES.md, verificó que el archivo realmente hablara de las pruebas de mutación. No lo editó y me avisó que la línea 140 decía «63».
+- La prueba nueva usa a una segunda usuaria (Ana) para la
