@@ -35,6 +35,9 @@ ALLOWED_HOSTS = ["localhost" , "127.0.0.1"]
 # Application definition
 
 INSTALLED_APPS = [
+    # daphne debe ir primero: reemplaza runserver por su versión ASGI
+    # (HTTP + WebSocket) sin cambiar el comando de arranque.
+    "daphne",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -44,6 +47,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "corsheaders",
+    "channels",
     "accounts",
     "workspaces",
     "documents",
@@ -79,6 +83,18 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+# Tiempo real: Redis como channel layer (y, en pasos siguientes, para el
+# estado del turno de edición y la presencia).
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [REDIS_URL]},
+    },
+}
 
 
 # Database
