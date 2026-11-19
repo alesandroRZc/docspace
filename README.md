@@ -81,7 +81,7 @@ Cubren los casos críticos que pide la prueba:
 
 Las pruebas se validaron con **mutación**: al invertir a propósito la verificación de membresía en `obtener_nivel`, la prueba del caso positivo falla, lo que confirma que detectan errores reales.
 
-En total son **63 pruebas**: las 10 originales de la Fase 1 y 53 de la Fase 2. En la Fase 2 se agregan pruebas de tiempo real (`documents/test_tiempo_real.py`) y de control optimista (`documents/test_control_optimista.py`):
+En total son **64 pruebas**: las 10 originales de la Fase 1 y 54 de la Fase 2. En la Fase 2 se agregan pruebas de tiempo real (`documents/test_tiempo_real.py`) y de control optimista (`documents/test_control_optimista.py`):
 
 - **Conexión:** sin token, token inválido, vencido o refresh token → cierre 4401; documento ajeno o eliminado → 4404; origen no permitido → rechazado; el token nunca vuelve en la respuesta.
 - **Permisos en cada mensaje:** un permiso revocado cierra la conexión en el siguiente mensaje; un lector recibe cambios, pero lo que emite se rechaza y no se retransmite.
@@ -166,6 +166,18 @@ Los tres últimos se pueden definir en `settings.py`; si no están, se usan los 
 
 En desarrollo, `daphne` en `INSTALLED_APPS` hace que `runserver` sirva HTTP y WebSocket (con recarga automática), sin cambiar el comando de arranque. **`runserver` es solo para desarrollo**: en producción se lanzaría `daphne -b 0.0.0.0 -p 8000 config.asgi:application` detrás de un proxy que permita WebSocket.
 
+## Más allá de lo pedido
+
+| Qué | Dónde verificarlo |
+|---|---|
+| Límite de tamaño de edición: un `editar` con más de `EDITAR_MAX_CARACTERES` (200 000) responde 413 sin retransmitirse ni guardarse | Prueba `test_editar_demasiado_grande_responde_413` |
+| Pruebas de mutación: se rompió a propósito cada pieza crítica para confirmar que su prueba falla | Verificación manual (resumen en «Pruebas automatizadas»; detalle en [`PROCESO-AGENTES.md`](PROCESO-AGENTES.md)); no hay script automatizado |
+| Avisos en vivo al guardar o restaurar por REST: los demás ven la versión nueva sin recargar | Pruebas `test_guardar_por_rest_avisa_a_los_conectados` y `test_restaurar_por_rest_avisa_a_los_conectados`; en pantalla, el historial se actualiza solo (sin prueba automatizada de frontend) |
+| Reconexión automática del WebSocket con espera exponencial (1 s → 10 s; no reintenta tras 4401/4404) | `frontend/src/api/tiempoReal.ts`; en pantalla, al detener el backend el indicador pasa a «Reconectando…» (sin prueba automatizada) |
+| Eventos de auditoría nuevos: `CONFLICTO_VERSION`, `BORRADOR_EN_CONFLICTO`, `BORRADOR_DESCARTADO`, `DESCARTAR_BORRADOR` | Pruebas de conflicto y descarte en `test_tiempo_real.py` y `test_control_optimista.py`; `GET /api/audit/` |
+| Autor visible en documentos y versiones (desde la Fase 1); en la Fase 2, también en vivo: quién edita, quién está conectado y quién guardó | Prueba `test_documento_y_versiones_muestran_el_nombre_del_autor`; pantalla del documento: «Creado por…», «por…» en el historial, «Editando: …» y avatares |
+| Limitaciones conocidas y mejoras futuras documentadas | Secciones «Limitaciones conocidas» y «Mejoras futuras» de este README |
+
 ## Limitaciones conocidas
 
 - **El usuario del WebSocket se carga al conectar.** Si se desactiva una cuenta mientras está conectada, la conexión sigue activa hasta que vence su token de acceso (60 min). Los permisos sobre el documento sí se vuelven a comprobar en cada mensaje.
@@ -186,7 +198,7 @@ En desarrollo, `daphne` en `INSTALLED_APPS` hace que `runserver` sirva HTTP y We
 - [x] API REST con autenticación JWT y permisos por documento
 - [x] Versionado inmutable, comparación y restauración
 - [x] Borrado lógico y bitácora de auditoría
-- [x] Pruebas automatizadas (pytest): 63 en total
+- [x] Pruebas automatizadas (pytest): 64 en total
 - [x] Frontend en React (login, registro, editor, historial, comparación, gestión de acceso)
 - [x] Todo el entorno con un solo comando (Docker Compose)
 - [x] **Fase 2 completa** (rama `fase-2`): colaboración en tiempo real con presencia, turno de edición, edición en vivo, control optimista por número de versión y avisos en vivo de versiones guardadas o restauradas
