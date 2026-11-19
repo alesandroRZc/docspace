@@ -6,6 +6,7 @@ import { api } from "../api/cliente";
 import { tieneNivel, type Documento } from "../api/tipos";
 import HistorialVersiones from "../components/HistorialVersiones";
 import CompararVersiones from "../components/CompararVersiones";
+import GestionAcceso from "../components/GestionAcceso";
 
 export default function DocumentoPage() {
   const { id } = useParams();
@@ -103,6 +104,7 @@ export default function DocumentoPage() {
 
         <HistorialVersiones documentoId={documento.id} miPermiso={documento.mi_permiso} />
         <CompararVersiones documentoId={documento.id} />
+        {puedeAdministrar && <GestionAcceso documento={documento} />}
       </Stack>
     </Container>
   );
