@@ -1,4 +1,3 @@
-
 # DocSpace
 
 Plataforma web de documentos colaborativos con espacios de trabajo aislados, permisos granulares por documento, historial de versiones inmutable y bitácora de auditoría.
@@ -19,26 +18,32 @@ Python 3.11 · Django 5.2 · Django REST Framework · SimpleJWT · drf-spectacul
 Las decisiones técnicas están justificadas en [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) y el modelo de datos en [`docs/diagrama-er.png`](docs/diagrama-er.png).
 
 ## Cómo levantar el proyecto
+Requisitos: **Docker Desktop** y **Git**. No hace falta instalar Python ni Node.
 
-Requisito: Docker Desktop.
+```bash
+git clone https://github.com/alesandroRZc/docspace.git
+cd docspace
+git checkout fase-1
+cp .env.example .env
+docker compose up --build
+```
+> En Windows con CMD, usar `copy .env.example .env` en lugar de `cp`. (En PowerShell `cp` funciona igual.)
 
-1. Copiar las variables de entorno:
-   ```bash
-   cp .env.example .env
-   ```
-   (En PowerShell: `copy .env.example .env`)
+Con eso se levantan **tres servicios**:
 
-2. Levantar todo con un solo comando:
-   ```bash
-   docker compose up --build
-   ```
-
-Al arrancar, el backend aplica las migraciones y crea automáticamente los datos de demostración.
-
-| Servicio | URL |
+| Servicio | Qué hace |
 |---|---|
-| Documentación de la API (Swagger) | http://localhost:8000/api/docs/ |
-| Esquema OpenAPI | http://localhost:8000/api/schema/ |
+| `db` | PostgreSQL 16 (con healthcheck) |
+| `backend` | Aplica migraciones, carga datos demo y levanta Django |
+| `frontend` | Servidor de desarrollo de Vite con recarga en vivo |
+
+## URLs
+
+| Recurso | URL |
+|---|---|
+| Aplicación web | http://localhost:5173 |
+| API | http://localhost:8000/api/ |
+| Documentación Swagger | http://localhost:8000/api/docs/ |
 
 ## Usuarios de prueba
 
@@ -76,6 +81,8 @@ Las pruebas se validaron con **mutación**: al invertir a propósito la verifica
 |---|---|---|---|
 | POST | `/api/auth/register/` | Registro (Gestor o Colaborador) | Público |
 | POST | `/api/auth/login/` | Login, devuelve tokens JWT | Público |
+| POST | `/api/auth/refresh/` | Renovar el token de acceso | Público (con refresh token) |
+| GET | `/api/auth/me/` | Datos del usuario autenticado | Autenticado |
 | GET/POST | `/api/workspaces/` | Listar mis espacios / crear espacio | Crear: Gestor |
 | POST | `/api/workspaces/{id}/members/` | Agregar miembro por email | Gestor del espacio |
 | POST | `/api/workspaces/{id}/members/create/` | Crear un colaborador dentro del espacio | Gestor del espacio |
@@ -90,11 +97,13 @@ Las pruebas se validaron con **mutación**: al invertir a propósito la verifica
 
 Un recurso de un espacio ajeno responde **404** (no 403), para no confirmar su existencia.
 
-## Estado del proyecto
+## Estado
 
-- [x] Diagrama ER y documento de arquitectura
-- [x] Backend completo del flujo principal, con Swagger
-- [x] Pruebas automatizadas de aislamiento, permisos y versionado
-- [x] Docker Compose con datos de demostración
-- [ ] Frontend en React
-- [ ] Fase 2: colaboración en tiempo real
+- [x] Modelo de datos, diagrama ER y documento de arquitectura
+- [x] API REST con autenticación JWT y permisos por documento
+- [x] Versionado inmutable, comparación y restauración
+- [x] Borrado lógico y bitácora de auditoría
+- [x] Pruebas automatizadas (pytest)
+- [x] Frontend en React (login, registro, editor, historial, comparación, gestión de acceso)
+- [x] Todo el entorno con un solo comando (Docker Compose)
+- [ ] Fase 2: colaboración en tiempo real (rama `fase-2`)
