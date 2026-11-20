@@ -96,6 +96,20 @@
 - **Honestidad del agente:** aclaró que el proyecto no tiene pruebas automáticas de frontend y que solo había verificado con lint y build; el comportamiento debía comprobarse a mano.
 - **Verificado a mano con tres navegadores (editor, gestor y lector):** el editor toma el turno y los demás ven "Editando: …" y el texto en vivo; el lector no tiene botón de edición; al guardar, el historial se actualiza en todos sin recargar; el guardado automático tras 20 s de inactividad libera el turno; con el editor escribiendo, una restauración hecha por el gestor muestra el aviso sin borrar su texto, y al guardar aparece el conflicto con ambos textos lado a lado; guardar encima crea la versión nueva y libera el turno.
 
+### 11. Valor añadido: sección «Más allá de lo pedido» y prueba del autor
+
+**Qué pedí:** documentar en el README lo que implementamos fuera de los requisitos, indicando dónde verificar cada punto, y que el agente primero comprobara en el código que cada uno existía y si tenía prueba automatizada.
+
+**Qué hizo bien el agente:**
+- Revisó los siete puntos antes de escribir y reportó con honestidad que tres no tenían prueba automatizada (pruebas de mutación, reconexión y autor visible). También aclaró que no tenía el PDF y que no podía confirmar qué estaba fuera de los requisitos.
+- Antes de enlazar PROCESO-AGENTES.md, verificó que el archivo realmente hablara de las pruebas de mutación. No lo editó y me avisó que la línea 140 decía «63».
+- La prueba nueva usa a una segunda usuaria (Ana) para la versión 2. Así distingue «autor de la versión» de «creador del documento». Si todo lo guardara el gestor, la prueba pasaría aunque el código confundiera los campos.
+
+**Lo que más destaco:** en la primera ronda de mutación, quitar el campo solo de `fields` hizo fallar la prueba, pero por una comprobación interna de DRF («field declared but not included»), no por la aserción de la prueba. El agente lo detectó solo: *cualquier* prueba que llamara a esos endpoints habría fallado igual. Repitió la mutación quitando el campo por completo, y ahí sí falló la aserción (`KeyError: 'creador_nombre'` / `'autor_nombre'`). Lección: no basta con que una prueba falle con el mutante; hay que fijarse en **por qué** falla.
+
+**Verificación:** `cmp` contra la copia (idéntico byte a byte), `git diff` de serializers.py vacío, **64 passed** y logs del backend sin errores.
+
+**Lección para mí:** al copiar diffs desde la terminal se pierden los colores, y no se distingue qué línea se quita y cuál se agrega. Para revisar diffs largos conviene usar una captura (Win + Shift + S).
 
 ## Resumen
 
@@ -153,11 +167,3 @@
 - **Las pruebas automáticas no bastan:** tres errores importantes (8, 9 y 10) solo aparecieron al usar la aplicación de verdad.
 - **Cada error se convirtió en una regla o una prueba**, para que no se repita.
 
-### 11. Valor añadido: sección «Más allá de lo pedido» y prueba del autor
-
-**Qué pedí:** documentar en el README lo que implementamos fuera de los requisitos, indicando dónde verificar cada punto, y que el agente primero comprobara en el código que cada uno existía y si tenía prueba automatizada.
-
-**Qué hizo bien el agente:**
-- Revisó los siete puntos antes de escribir y reportó con honestidad que tres no tenían prueba automatizada (pruebas de mutación, reconexión y autor visible). También aclaró que no tenía el PDF y que no podía confirmar qué estaba fuera de los requisitos.
-- Antes de enlazar PROCESO-AGENTES.md, verificó que el archivo realmente hablara de las pruebas de mutación. No lo editó y me avisó que la línea 140 decía «63».
-- La prueba nueva usa a una segunda usuaria (Ana) para la
