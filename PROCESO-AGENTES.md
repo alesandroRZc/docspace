@@ -66,7 +66,7 @@
 - **Verificación por mutación (iniciativa del agente):** hizo que el latido renovara el turno; la prueba `test_un_latido_sin_ediciones_no_renueva_el_turno` falló. Restauró el archivo y lo verificó con `cmp`.
 - **Trade-off:** tres pruebas esperan la expiración real de Redis (1-2 s), así que la suite tarda ~55 s, a cambio de probar la expiración real y no un reloj simulado.
 - **Verificación:** 43 pruebas pasan.
-- **Incidente detectado al probar a mano:** el login fallaba. Los logs mostraban un `ImportError`: el servidor de desarrollo se había recargado a mitad de la edición del Paso 6 (con `services.py` ya cambiado y `consumers.py` todavía no) y quedó caído. Las 57 pruebas pasaban porque `pytest` arranca un proceso nuevo con los archivos ya completos. Lo resolví reiniciando el backend y agregué a CLAUDE.md la regla de verificar los logs del servidor al terminar cada paso. **Lección:** las pruebas automáticas no reemplazan comprobar la aplicación en ejecución.
+
 
 
 ### 8. Paso 6 — Edición en vivo y guardado
@@ -137,7 +137,7 @@
 | 10 | Guardar o restaurar por REST no avisaba a los demás conectados | Prueba manual con dos navegadores |
 
 ## Cómo verifiqué que no se rompió la Fase 1
-- **Las 10 pruebas originales nunca se modificaron** y pasaron en cada paso (63 en total al final).
+- **Las 10 pruebas originales nunca se modificaron** y pasaron en cada paso (64 en total al final).
 - Los cambios al código de la Fase 1 (`guardar_version`, `tiene_nivel`) fueron opcionales o refactors sin cambio de comportamiento, cubiertos por esas pruebas.
 - Después de cada paso de infraestructura comprobé a mano en el navegador el login, los permisos, el historial y la gestión de acceso.
 - **Clon limpio desde GitHub:** cloné el repositorio en otra carpeta, seguí el README al pie de la letra y el proyecto levantó con un solo comando, aplicando todas las migraciones desde cero.
